@@ -28,6 +28,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import type { WorldEventCue, WorldSceneProps } from "@/components/epos/world-scene";
+import { useBattlefieldAudio } from "@/hooks/use-battlefield-audio";
 import { type SimulationVoiceBeat, useSimulationVoice } from "@/hooks/use-simulation-voice";
 import { getScenarioProgress, getSimulationOutcome } from "@/lib/simulation/engine";
 import { getScenarioPack, SCENARIO_CATALOG, type PreviewScenarioPack, type ScenarioPack } from "@/lib/simulation/scenario-catalog";
@@ -79,6 +80,32 @@ function getAgentVoice(agent: AgentRuntimeState) {
   return `I am ${agent.emotionalState.primary}. ${agent.currentObjective} I can only speak from reports, memories, and observations available to me.`;
 }
 
+function resolveWhatIfPreset(
+  prompt: string,
+  presets: readonly { id: string; label: string; description: string; type: string }[],
+) {
+  const normalized = prompt.toLowerCase();
+  const searchable = (preset: (typeof presets)[number]) =>
+    `${preset.id} ${preset.label} ${preset.description}`.toLowerCase();
+  const find = (predicate: (preset: (typeof presets)[number], text: string) => boolean) =>
+    presets.find((preset) => predicate(preset, searchable(preset)));
+
+  if (/(wind|breeze|rain|mud|ground|weather|dry)/.test(normalized)) {
+    return find((preset) => preset.type === "weather");
+  }
+  if (/(supply|supplies|food|provisions|ammunition|ammo)/.test(normalized)) {
+    return find((preset, text) => preset.type === "resource" || /(supply|food|ammo|ammunition)/.test(text));
+  }
+  if (/(reinforcement|reinforce|arrive|arrival|prussian|blücher|blucher|troops)/.test(normalized)) {
+    return find((preset, text) => preset.type === "reinforcement" || /(reinforce|arriv|prussian|blucher)/.test(text));
+  }
+  if (/(hold|farm|fort|bridge|la haye)/.test(normalized)) {
+    return find((preset) => preset.type === "event" || preset.type === "infrastructure");
+  }
+
+  return undefined;
+}
+
 export function EposExperience() {
   const simulation = useEposStore((state) => state.simulation);
   const selectedAgentId = useEposStore((state) => state.selectedAgentId);
@@ -109,7 +136,9 @@ export function EposExperience() {
   const [isAsking, setIsAsking] = useState(false);
   const [manualSpeechMessage, setManualSpeechMessage] = useState<AgentMessage | null>(null);
   const lastQueuedNarrationId = useRef<string | undefined>(undefined);
+  const lastBattlefieldEventId = useRef<string | undefined>(undefined);
   const [skippedNarrationId, setSkippedNarrationId] = useState<string | undefined>(undefined);
+  const [battlefieldAudioRevision, setBattlefieldAudioRevision] = useState(0);
   const {
     isSpeaking,
     activeSegment,
@@ -122,6 +151,11 @@ export function EposExperience() {
     setRateMultiplier: setVoiceRateMultiplier,
     cancel: cancelVoice,
   } = useSimulationVoice({ language: "en-US" });
+  const {
+    unlock: unlockBattlefieldAudio,
+    playCue: playBattlefieldCue,
+    stop: stopBattlefieldAudio,
+  } = useBattlefieldAudio(narrationAudioEnabled);
 
   const selectedAgent =
     simulation.agents.find((agent) => agent.id === selectedAgentId) ?? simulation.agents[0];
@@ -131,6 +165,24 @@ export function EposExperience() {
   const progress = getScenarioProgress(simulation);
   const outcome = getSimulationOutcome(simulation);
   const activeScenarioPack = getScenarioPack(simulation.scenario.id);
+  const scenarioPresentation = simulation.scenario.presentation;
+  const metricLabels = scenarioPresentation?.metricLabels ?? {
+    morale: "Coalition morale",
+    supplies: "Supply resilience",
+    mobility: "Operational mobility",
+    cohesion: "Coordination",
+  };
+  const causalThread = scenarioPresentation?.causalThread ?? {
+    title: "Conditions → decisions → consequences",
+    description:
+      "Use the timeline to connect changing conditions with decisions, while treating no single number as a complete explanation.",
+  };
+  const mission = scenarioPresentation?.mission ?? {
+    title: "Trace the evidence trail",
+    description:
+      "Compare reports, conditions, and decisions before drawing conclusions about the outcome.",
+    steps: ["Observe", "Compare reports", "Test a premise"],
+  };
   const whatIfPresets = activeScenarioPack?.status === "playable" ? activeScenarioPack.whatIfPresets : [];
   const activeModifiers = simulation.modifiers.filter((modifier) =>
     whatIfPresets.some((preset) => preset.id === modifier.id),
@@ -263,6 +315,18 @@ export function EposExperience() {
   }, [enqueueBeat, narrationAudioEnabled, narrationBeat, skippedNarrationId]);
 
   useEffect(() => {
+    if (!activeWorldEvent?.action) {
+      lastBattlefieldEventId.current = undefined;
+      return;
+    }
+    if (!narrationAudioEnabled || lastBattlefieldEventId.current === activeWorldEvent.id) return;
+
+    if (playBattlefieldCue(activeWorldEvent.action)) {
+      lastBattlefieldEventId.current = activeWorldEvent.id;
+    }
+  }, [activeWorldEvent, battlefieldAudioRevision, narrationAudioEnabled, playBattlefieldCue]);
+
+  useEffect(() => {
     if (simulation.status !== "running" || isSpeaking || shouldAwaitNarrationCompletion) return;
 
     // Each event waits for its matching beat to complete, then advances at
@@ -279,6 +343,16 @@ export function EposExperience() {
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [workspaceOpen]);
+
+  const prepareBattlefieldAudio = () => {
+    if (!narrationAudioEnabled) return;
+
+    // This runs directly from a learner's button click. Browsers only permit
+    // Web Audio to start after such a gesture, never from the timeline effect.
+    void unlockBattlefieldAudio().then((unlocked) => {
+      if (unlocked) setBattlefieldAudioRevision((revision) => revision + 1);
+    });
+  };
 
   const speakAgent = () => {
     if (!selectedAgent) return;
@@ -310,6 +384,7 @@ export function EposExperience() {
     if (narrationAudioEnabled) {
       setNarrationAudioEnabled(false);
       cancelVoice();
+      stopBattlefieldAudio();
       return;
     }
 
@@ -321,9 +396,12 @@ export function EposExperience() {
 
     if (simulation.status === "running") {
       pauseVoice();
+      stopBattlefieldAudio();
       togglePlayback();
       return;
     }
+
+    prepareBattlefieldAudio();
 
     if (narrationAudioEnabled && isSpeaking) {
       resumeVoice();
@@ -355,9 +433,12 @@ export function EposExperience() {
     const preset = whatIfPresets.find((candidate) => candidate.id === presetId);
     if (!preset) return;
 
+    prepareBattlefieldAudio();
     cancelVoice();
+    stopBattlefieldAudio();
     setManualSpeechMessage(null);
     lastQueuedNarrationId.current = undefined;
+    lastBattlefieldEventId.current = undefined;
     setSkippedNarrationId(undefined);
 
     if (simulation.modifiers.some((modifier) => modifier.id === preset.id)) {
@@ -377,9 +458,12 @@ export function EposExperience() {
       return;
     }
 
+    prepareBattlefieldAudio();
     cancelVoice();
+    stopBattlefieldAudio();
     setManualSpeechMessage(null);
     lastQueuedNarrationId.current = undefined;
+    lastBattlefieldEventId.current = undefined;
     setSkippedNarrationId(undefined);
     loadScenario(pack.scenario, pack.defaultAgentId);
     setSelectedPreview(null);
@@ -388,22 +472,28 @@ export function EposExperience() {
 
   const restartSimulation = () => {
     cancelVoice();
+    stopBattlefieldAudio();
     setManualSpeechMessage(null);
     lastQueuedNarrationId.current = undefined;
+    lastBattlefieldEventId.current = undefined;
     setSkippedNarrationId(undefined);
     restart();
   };
 
   const advanceSimulationStep = () => {
     if (isSpeaking) return;
+    prepareBattlefieldAudio();
     advanceOneTick();
   };
 
   const jumpToHistoricalMoment = () => {
     if (!nextHistoricalMoment) return;
+    prepareBattlefieldAudio();
     cancelVoice();
+    stopBattlefieldAudio();
     setManualSpeechMessage(null);
     lastQueuedNarrationId.current = undefined;
+    lastBattlefieldEventId.current = undefined;
     setSkippedNarrationId(undefined);
     jumpToTick(nextHistoricalMoment.tick);
   };
@@ -413,14 +503,13 @@ export function EposExperience() {
     const prompt = whatIfPrompt.trim().toLowerCase();
     if (!prompt) return;
 
-    if (/(wind|breeze|weather)/.test(prompt) && /(no|weak|calm|without)/.test(prompt)) {
-      changeModifier("no-strong-winds");
-    } else if (/(supply|supplies|food|provisions)/.test(prompt)) {
-      changeModifier("coalition-supplies-doubled");
-    } else if (/(reinforcement|reinforce|arrive early|more troops)/.test(prompt)) {
-      changeModifier("wei-reinforcements-arrive");
+    const preset = resolveWhatIfPreset(prompt, whatIfPresets);
+    if (preset) {
+      changeModifier(preset.id);
     } else {
-      setAnswer("This classroom slice can currently test wind, coalition supplies, or early Wei reinforcements. Try phrasing one of those variables, then compare the causal chain.");
+      setAnswer(
+        `This classroom slice can currently test: ${whatIfPresets.map((candidate) => candidate.label.toLowerCase()).join(", ")}. Try one of those variables, then compare the causal chain.`,
+      );
       setChatOpen(true);
     }
     setWhatIfPrompt("");
@@ -465,19 +554,21 @@ export function EposExperience() {
   };
 
   const currentOutcomeText = activeModifier
-    ? activeModifier.id === "no-strong-winds"
-      ? "Without a reliable southeast wind, the fire ships lose much of their modeled reach. The northern fleet remains pressured by illness and logistics, but withdrawal is no longer automatic."
-      : activeModifier.id === "coalition-supplies-doubled"
-        ? "Extra reserves reduce immediate coalition strain. That helps coordination persist, though it does not remove the risks created by weather and river movement."
-        : "Earlier reinforcement raises northern readiness before the fire-ship window, narrowing the coalition’s margin for error."
-    : "The baseline keeps a narrow weather window in play. Advance the timeline to see how the model connects fleet formation, wind, and readiness.";
+    ? `${activeModifier.description} Continue the timeline to compare this speculative premise with the historical baseline.`
+    : `${simulation.scenario.historicalNote} Advance the timeline to trace the connected conditions and choices.`;
+  const causalDescription = causalThread.description
+    .replace("{diseaseRisk}", String(simulation.world.pressures.diseaseRisk))
+    .replace("{groundMobility}", String(simulation.world.pressures.riverMobility));
 
-  const selectedColor = selectedAgent ? factionColors[selectedAgent.factionId] ?? factionColors.neutral : factionColors.neutral;
+  const selectedColor = selectedAgent
+    ? simulation.world.factions[selectedAgent.factionId]?.color ?? factionColors[selectedAgent.factionId] ?? factionColors.neutral
+    : factionColors.neutral;
   const statusText = simulation.status === "running" ? "Simulation live" : simulation.status === "complete" ? "Checkpoint complete" : "Simulation paused";
+  const reportAgents = simulation.agents.filter((agent) => agent.id !== selectedAgent?.id);
   const delegationSteps = [
     { label: `${selectedAgent?.name ?? "The commander"} frames the question`, complete: delegationActive },
-    { label: "River Messenger gathers camp reports", complete: delegationActive && simulation.tick >= 1 },
-    { label: "Lu Su cross-checks supply evidence", complete: delegationActive && simulation.tick >= 2 },
+    { label: `${reportAgents[0]?.name ?? "A field observer"} gathers local reports`, complete: delegationActive && simulation.tick >= 1 },
+    { label: `${reportAgents[1]?.name ?? "A second witness"} cross-checks the evidence`, complete: delegationActive && simulation.tick >= 2 },
     { label: "A source-aware report returns", complete: delegationActive && simulation.tick >= 3 },
   ];
 
@@ -517,6 +608,8 @@ export function EposExperience() {
           <WorldScene
             agents={simulation.agents}
             locations={simulation.scenario.locations}
+            factions={simulation.world.factions}
+            sceneTheme={scenarioPresentation?.scene ?? "red-cliffs"}
             selectedAgentId={selectedAgentId}
             weather={simulation.world.weather}
             followSelected={followSelected}
@@ -558,9 +651,9 @@ export function EposExperience() {
                 <button
                   className={`watch-control-button watch-audio-button${narrationAudioEnabled ? " is-active" : ""}`}
                   type="button"
-                  aria-label={narrationAudioEnabled ? "Turn off narration voice" : "Turn on narration voice"}
+                  aria-label={narrationAudioEnabled ? "Turn off narration and battlefield sound" : "Turn on narration and battlefield sound"}
                   aria-pressed={narrationAudioEnabled}
-                  title={narrationAudioEnabled ? "Narration voice on" : "Narration voice off"}
+                  title={narrationAudioEnabled ? "Narration and battlefield sound on" : "Narration and battlefield sound off"}
                   onClick={toggleNarrationAudio}
                 >
                   {narrationAudioEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}
@@ -667,7 +760,9 @@ export function EposExperience() {
                         <p className="eyebrow">Scenario library</p>
                         <h3 id="scenario-library-title">Choose a historical world</h3>
                       </div>
-                      <span>1 playable · {SCENARIO_CATALOG.length - 1} in research</span>
+                      <span>
+                        {SCENARIO_CATALOG.filter((pack) => pack.status === "playable").length} playable · {SCENARIO_CATALOG.filter((pack) => pack.status === "preview").length} in research
+                      </span>
                     </div>
                     <div className="scenario-library__grid">
                       {SCENARIO_CATALOG.map((pack) => (
@@ -725,25 +820,25 @@ export function EposExperience() {
             <div className="metric-stack">
               {[
                 {
-                  label: "Coalition morale",
+                  label: metricLabels.morale,
                   value: simulation.world.factions["sun-liu"].resources.morale,
                   start: "#50b99d",
                   end: "#278875",
                 },
                 {
-                  label: "Supply resilience",
+                  label: metricLabels.supplies,
                   value: simulation.world.factions["sun-liu"].resources.supplies,
                   start: "#e8ba52",
                   end: "#d18a2a",
                 },
                 {
-                  label: "River mobility",
+                  label: metricLabels.mobility,
                   value: simulation.world.pressures.riverMobility,
                   start: "#64aede",
                   end: "#287bc4",
                 },
                 {
-                  label: "Alliance cohesion",
+                  label: metricLabels.cohesion,
                   value: simulation.world.pressures.diplomaticCohesion,
                   start: "#9f89c9",
                   end: "#7457a9",
@@ -763,30 +858,22 @@ export function EposExperience() {
 
             <section className="cause-card">
               <span className="tiny-label">Current causal thread</span>
-              <strong>Illness → readiness → fleet formation</strong>
-              <p>
-                Disease risk is {simulation.world.pressures.diseaseRisk}/100. Watch how it influences decisions without making any one factor a complete explanation.
-              </p>
+              <strong>{causalThread.title}</strong>
+              <p>{causalDescription}</p>
             </section>
 
             <div>
               <p className="eyebrow">Live signals</p>
               <div className="signal-list">
-                <div className="signal-row">
-                  <span className="signal-dot amber" />
-                  <span>Northern anchorage</span>
-                  <span className="signal-meta">strained</span>
-                </div>
-                <div className="signal-row">
-                  <span className="signal-dot blue" />
-                  <span>Xiakou landing</span>
-                  <span className="signal-meta">open</span>
-                </div>
-                <div className="signal-row">
-                  <span className="signal-dot" />
-                  <span>River communities</span>
-                  <span className="signal-meta">watch</span>
-                </div>
+                {Object.values(simulation.world.infrastructure)
+                  .slice(0, 3)
+                  .map((infrastructure, index) => (
+                    <div className="signal-row" key={infrastructure.id}>
+                      <span className={`signal-dot${infrastructure.status === "strained" || infrastructure.status === "damaged" ? " amber" : index === 1 ? " blue" : ""}`} />
+                      <span>{infrastructure.name}</span>
+                      <span className="signal-meta">{infrastructure.status}</span>
+                    </div>
+                  ))}
               </div>
             </div>
           </aside>
@@ -885,7 +972,7 @@ export function EposExperience() {
                   key={agent.id}
                   onClick={() => selectAgent(agent.id)}
                 >
-                  <span className="agent-row-avatar" style={{ background: factionColors[agent.factionId] }}>{agent.name.charAt(0)}</span>
+                  <span className="agent-row-avatar" style={{ background: simulation.world.factions[agent.factionId]?.color ?? factionColors[agent.factionId] }}>{agent.name.charAt(0)}</span>
                   <span className="agent-row-name">{agent.name}</span>
                   <span className="agent-row-state">{agent.status}</span>
                 </button>
@@ -923,15 +1010,17 @@ export function EposExperience() {
             <div className="mission-number">01</div>
             <div>
               <p className="task-overline">{delegationActive ? "Autonomous delegation" : "Guided investigation"}</p>
-              <h2 className="mission-title">{delegationActive ? "Find why readiness is falling" : "Trace the fragile alliance"}</h2>
-              <p className="mission-description">{delegationActive ? "Agents are separating observation from inference before returning a report. The plan remains visible so students can challenge each handoff." : "Identify how weather, health, and trust shape the coalition’s choices. Follow reports instead of assuming a leader knows everything."}</p>
+              <h2 className="mission-title">{delegationActive ? "Find why readiness is changing" : mission.title}</h2>
+              <p className="mission-description">{delegationActive ? "Agents are separating observation from inference before returning a report. The plan remains visible so students can challenge each handoff." : mission.description}</p>
               <div className="task-steps">
                 {delegationActive
                   ? delegationSteps.map((step) => <span className={`task-step${step.complete ? " is-done" : ""}`} key={step.label}><Check size={10} />{step.label}</span>)
                   : <>
-                      <span className={`task-step${progress.tick >= 1 ? " is-done" : ""}`}><Check size={10} />Council</span>
-                      <span className={`task-step${progress.tick >= 2 ? " is-done" : ""}`}><Check size={10} />Camp report</span>
-                      <span className={`task-step${progress.tick >= 4 ? " is-done" : ""}`}><Check size={10} />Test plan</span>
+                      {mission.steps.slice(0, 3).map((step, index) => (
+                        <span className={`task-step${progress.tick >= [1, 2, 4][index] ? " is-done" : ""}`} key={step}>
+                          <Check size={10} />{step}
+                        </span>
+                      ))}
                     </>}
               </div>
             </div>
@@ -957,12 +1046,12 @@ export function EposExperience() {
                   className={`whatif-option${activeModifier?.id === preset.id ? " is-active" : ""}`}
                   onClick={() => changeModifier(preset.id)}
                 >
-                  {preset.id === "no-strong-winds" ? "No wind" : preset.id === "coalition-supplies-doubled" ? "More food" : "Reinforce Wei"}
+                  {preset.label}
                 </button>
               ))}
             </div>
             <form className="whatif-form" onSubmit={submitNaturalLanguageWhatIf}>
-              <input className="whatif-input" value={whatIfPrompt} onChange={(event) => setWhatIfPrompt(event.target.value)} placeholder="Try: What if supplies doubled?" maxLength={120} />
+              <input className="whatif-input" value={whatIfPrompt} onChange={(event) => setWhatIfPrompt(event.target.value)} placeholder={scenarioPresentation?.whatIfPromptHint ?? "Try: What if supplies doubled?"} maxLength={120} />
               <button className="whatif-submit" type="submit" aria-label="Apply what-if prompt"><Send size={12} /></button>
             </form>
             <div className="whatif-result">

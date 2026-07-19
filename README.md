@@ -2,7 +2,7 @@
 
 Epos is an educational historical-simulation prototype. Instead of presenting a battle as a score to win, it makes logistics, weather, trust, incomplete information, and civilian impact visible as connected systems.
 
-The first scenario is a compact, source-aware Red Cliffs simulation. It uses a deterministic model for repeatability in a classroom, with an optional server-only OpenAI briefing route for contextual questions.
+The build includes source-aware simulations of Red Cliffs and the Battle of Waterloo. Each uses a deterministic model for repeatability in a classroom, with an optional server-only OpenAI briefing route for contextual questions.
 
 ## What is included
 
@@ -10,16 +10,17 @@ The first scenario is a compact, source-aware Red Cliffs simulation. It uses a d
 - Orbit, zoom, and follow-selected-agent camera controls
 - Typed historical scenario data: agents, memories, limited knowledge, trust, objectives, locations, resources, and timeline events
 - A reusable simulation engine with transparent state transitions and replayable what-if modifiers
-- Baseline and counterfactual branches for wind, supplies, and reinforcements
+- Baseline and counterfactual branches for weather, supplies, infrastructure, and reinforcements
 - Timeline controls: pause, speed, single step, and jump-to-next historical moment
 - Agent inspector with profile, memory/knowledge, trust network, and Web Speech API voice output
 - Live caption card with “what happened” and “why it matters” explanations, replayable narration, and source-labeled in-world agent speech bubbles
+- Event-triggered browser audio for rain, artillery, musket volleys, cavalry, and withdrawal—kept below narration and enabled only after a learner interaction
 - A visible delegation plan that makes information handoffs inspectable
 - An optional `/api/briefing` route that keeps OpenAI credentials on the server and falls back to an evidence-limited local briefing when no key is set
 
 ## Scenario library
 
-Red Cliffs is the playable teaching model in this build. The in-app library also surfaces Waterloo, Sekigahara, Normandy, Surabaya, Jerusalem (1187), Central Asia (1219–1221), and the Roman Danube frontier as historical previews. Previews are intentionally not represented as working simulations until their sources, agent rules, causal model, and world are authored and reviewed.
+Red Cliffs and Waterloo are playable teaching models in this build. The in-app library also surfaces Sekigahara, Normandy, Surabaya, Jerusalem (1187), Central Asia (1219–1221), and the Roman Danube frontier as historical previews. Previews are intentionally not represented as working simulations until their sources, agent rules, causal model, and world are authored and reviewed.
 
 ## Architecture
 
@@ -33,6 +34,7 @@ components/epos/
 lib/simulation/
   types.ts                       Framework-free domain types
   red-cliffs.ts                  Structured scenario data and what-if presets
+  waterloo.ts                    Structured Waterloo data and what-if presets
   engine.ts                      Pure deterministic simulation functions
 stores/
   epos-store.ts                  Zustand UI/simulation state
@@ -64,7 +66,7 @@ Codex is useful for authoring and maintaining scenario packs, simulation rules, 
 
 ## Historical-method note
 
-The Red Cliffs timeline includes historical anchors alongside explicit inference and speculation labels. Numerical values, agent dialogue, and counterfactual outcomes are transparent teaching-model inputs—not claims of settled historical fact. Learners should compare the model’s causal chain with primary and secondary sources.
+The Red Cliffs and Waterloo timelines include historical anchors alongside explicit inference and speculation labels. Numerical values, agent dialogue, and counterfactual outcomes are transparent teaching-model inputs—not claims of settled historical fact. Learners should compare the model’s causal chain with primary and secondary sources.
 
 ## Verification
 

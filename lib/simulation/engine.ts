@@ -49,20 +49,12 @@ const normalizeWeather = (weather: WeatherState): WeatherState => ({
 const cloneWorld = (world: WorldState): WorldState => ({
   ...world,
   weather: normalizeWeather({ ...world.weather }),
-  factions: {
-    wei: {
-      ...world.factions.wei,
-      resources: { ...world.factions.wei.resources },
-    },
-    "sun-liu": {
-      ...world.factions["sun-liu"],
-      resources: { ...world.factions["sun-liu"].resources },
-    },
-    neutral: {
-      ...world.factions.neutral,
-      resources: { ...world.factions.neutral.resources },
-    },
-  },
+  factions: Object.fromEntries(
+    Object.entries(world.factions).map(([id, faction]) => [
+      id,
+      { ...faction, resources: { ...faction.resources } },
+    ]),
+  ) as WorldState["factions"],
   infrastructure: Object.fromEntries(
     Object.entries(world.infrastructure).map(([id, infrastructure]) => [
       id,
@@ -223,7 +215,11 @@ const modifierChangesWeather = (state: SimulationState) =>
     (modifier) =>
       modifier.type === "weather" &&
       isModifierActiveAt(modifier, state.tick) &&
-      (modifier.weather.windDirection !== undefined || modifier.weather.windStrength !== undefined),
+      (modifier.weather.condition !== undefined ||
+        modifier.weather.windDirection !== undefined ||
+        modifier.weather.windStrength !== undefined ||
+        modifier.weather.precipitation !== undefined ||
+        modifier.weather.visibility !== undefined),
   );
 
 const applyPersistentModifiers = (state: SimulationState): SimulationState => {
@@ -477,8 +473,8 @@ const applyTimelineEvent = (state: SimulationState, event: TimelineEvent): Simul
     const narration = weatherWasOverridden
       ? snapshotNarration({
           story:
-            "Counterfactual run: the expected southeast wind does not take hold over the channel. From this moment, the choices and consequences shown here are speculative alternatives rather than the historical baseline.",
-          why: "An active counterfactual keeps the weather different from the baseline timeline, so downstream choices must be interpreted as speculative.",
+            "Counterfactual run: the expected weather conditions do not take hold. From this moment, the choices and consequences shown here are speculative alternatives rather than the historical baseline.",
+          why: "An active counterfactual changes a condition in the baseline timeline, so downstream choices must be interpreted as speculative.",
           whyEvidence: "speculation",
         })
       : snapshotNarration(event.narration);
@@ -510,6 +506,18 @@ const applyAmbientEffects = (state: SimulationState): SimulationState => {
   const weatherPenalty = state.world.weather.condition === "rain" || state.world.weather.condition === "storm" ? 2 : 0;
   const illnessPenalty = state.world.pressures.diseaseRisk >= 65 ? 2 : 0;
   let next = state;
+
+  // Red Cliffs models a sustained river campaign where disease, provisions,
+  // and a fleet's daily condition are central. Other scenarios author their
+  // own event effects and retain only the reusable weather friction below.
+  if (state.scenario.id !== "red-cliffs-208") {
+    if (weatherPenalty > 0) {
+      next = withAdjustedPressure(next, "supplyStrain", weatherPenalty);
+      next = withAdjustedPressure(next, "riverMobility", -weatherPenalty);
+    }
+
+    return next;
+  }
 
   if (state.tick > 0) {
     next = withAdjustedResource(next, "wei", "food", -(1 + weatherPenalty));
@@ -701,11 +709,10 @@ export const getScenarioProgress = (state: SimulationState): SimulationProgress 
 export const getFactionScore = (state: SimulationState, factionId: FactionId) => {
   const resources = state.world.factions[factionId].resources;
   const pressureAdjustment =
-    factionId === "wei"
-      ? -state.world.pressures.diseaseRisk * 0.2 - state.world.pressures.supplyStrain * 0.12
-      : factionId === "sun-liu"
-        ? state.world.pressures.diplomaticCohesion * 0.16 + state.world.pressures.riverMobility * 0.08
-        : -state.world.pressures.supplyStrain * 0.16;
+    state.world.pressures.diplomaticCohesion * 0.1 +
+    state.world.pressures.riverMobility * 0.05 -
+    state.world.pressures.diseaseRisk * 0.08 -
+    state.world.pressures.supplyStrain * 0.1;
 
   return Math.round(
     resources.morale * 0.28 +
@@ -726,10 +733,15 @@ export const getSimulationOutcome = (state: SimulationState): SimulationOutcome 
   const scoreGap = Math.abs(getFactionScore(state, leadingFactionId) - getFactionScore(state, opposingFactionId));
   const isCounterfactual = state.modifiers.length > 0;
   const leadingName = state.world.factions[leadingFactionId].name;
+  const firstFaction = state.world.factions.wei;
+  const secondFaction = state.world.factions["sun-liu"];
+  const metricLabels = state.scenario.presentation?.metricLabels;
+  const mobilityLabel = metricLabels?.mobility ?? "Operational mobility";
+  const cohesionLabel = metricLabels?.cohesion ?? "Coordination";
   const causalFactors = [
-    `Wind strength is ${state.world.weather.windStrength}/100 from the ${state.world.weather.windDirection}.`,
-    `Northern force readiness is ${state.world.factions.wei.resources.readiness}/100 amid disease risk of ${state.world.pressures.diseaseRisk}/100.`,
-    `Coalition cohesion is ${state.world.pressures.diplomaticCohesion}/100 and river mobility is ${state.world.pressures.riverMobility}/100.`,
+    `Weather is ${state.world.weather.condition}, with ${state.world.weather.windStrength}/100 wind from the ${state.world.weather.windDirection}.`,
+    `${firstFaction.name} readiness is ${firstFaction.resources.readiness}/100; ${secondFaction.name} readiness is ${secondFaction.resources.readiness}/100.`,
+    `${cohesionLabel} is ${state.world.pressures.diplomaticCohesion}/100 and ${mobilityLabel.toLowerCase()} is ${state.world.pressures.riverMobility}/100.`,
   ];
 
   return {

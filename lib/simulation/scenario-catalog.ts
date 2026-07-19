@@ -1,4 +1,5 @@
 import { RED_CLIFFS_SCENARIO, RED_CLIFFS_WHAT_IF_PRESETS } from "./red-cliffs";
+import { WATERLOO_SCENARIO, WATERLOO_WHAT_IF_PRESETS } from "./waterloo";
 import type { ScenarioDefinition, WhatIfModifier } from "./types";
 
 export type ScenarioFocus = "logistics" | "diplomacy" | "geography" | "leadership" | "civilian impact" | "weather";
@@ -48,15 +49,17 @@ export const SCENARIO_CATALOG: readonly ScenarioPack[] = [
     whatIfPresets: RED_CLIFFS_WHAT_IF_PRESETS,
   },
   {
-    id: "waterloo-1815",
-    title: "Battle of Waterloo",
-    era: "18 June 1815",
+    id: WATERLOO_SCENARIO.id,
+    title: WATERLOO_SCENARIO.title,
+    era: WATERLOO_SCENARIO.era,
     locationLabel: "Waterloo · Belgium",
     coordinateLabel: "50.68° N · 4.41° E",
     learningFocus: ["weather", "logistics", "leadership", "geography"],
-    scopeNote: "A future model focused on rain, mud, timing, coalition communication, and the limits of command visibility.",
-    status: "preview",
-    previewNote: "Historical preview — the simulation model, source pack, and world are in development.",
+    scopeNote: "A playable, source-aware model of rain, mud, coalition timing, and the limits of command visibility.",
+    status: "playable",
+    scenario: WATERLOO_SCENARIO,
+    defaultAgentId: "wellington",
+    whatIfPresets: WATERLOO_WHAT_IF_PRESETS,
   },
   {
     id: "sekigahara-1600",

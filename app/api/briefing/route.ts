@@ -47,7 +47,7 @@ function localBriefing(context: BriefingRequest) {
     ? ` This run includes the speculative premise: ${context.world.modifiers.join(", ")}.`
     : " This is the baseline teaching model.";
 
-  return `${context.selectedAgent.name} cannot know the whole campaign. Based on the reports available at this moment, ${knownReport ?? "there is no verified new report yet"}. The river has ${context.world.weather.windStrength}/100 ${context.world.weather.windDirection} wind, while disease risk is ${context.world.pressures.diseaseRisk}/100.${counterfactual} A useful next question is: who could independently confirm this report?`;
+  return `${context.selectedAgent.name} cannot know the whole campaign. Based on the reports available at this moment, ${knownReport ?? "there is no verified new report yet"}. Conditions are ${context.world.weather.condition}, with ${context.world.weather.windStrength}/100 ${context.world.weather.windDirection} wind; supply strain is ${context.world.pressures.supplyStrain}/100 and operational mobility is ${context.world.pressures.riverMobility}/100.${counterfactual} A useful next question is: who could independently confirm this report?`;
 }
 
 function outputText(payload: unknown) {

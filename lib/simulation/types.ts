@@ -51,6 +51,7 @@ export type WindDirection =
   | "variable";
 
 export type InfrastructureStatus = "intact" | "strained" | "damaged" | "collapsed";
+export type WorldSceneTheme = "red-cliffs" | "waterloo";
 export type EventKind =
   | "diplomacy"
   | "logistics"
@@ -60,8 +61,16 @@ export type EventKind =
   | "retreat"
   | "social";
 
-/** A scene-level action that a renderer can play without interpreting prose. */
-export type WorldActionCue = "fire-attack";
+/** A scene-level action that renderers and sound can play without interpreting prose. */
+export type WorldActionCue =
+  | "fire-attack"
+  | "rain-field"
+  | "artillery-barrage"
+  | "farm-assault"
+  | "cavalry-charge"
+  | "reinforcement-arrival"
+  | "final-assault"
+  | "withdrawal";
 export type EvidenceKind = "historical-fact" | "historical-inference" | "speculation";
 export type SimulationStatus = "ready" | "running" | "paused" | "complete";
 export type SimulationPhase = "dawn" | "morning" | "afternoon" | "dusk" | "night";
@@ -75,7 +84,17 @@ export interface WorldPosition {
 export interface ScenarioLocation {
   id: LocationId;
   name: string;
-  kind: "camp" | "harbor" | "river" | "village" | "fortress" | "road" | "forest";
+  kind:
+    | "camp"
+    | "harbor"
+    | "river"
+    | "village"
+    | "fortress"
+    | "road"
+    | "forest"
+    | "farm"
+    | "ridge"
+    | "field";
   position: WorldPosition;
   description: string;
 }
@@ -136,6 +155,8 @@ export interface ScenarioAgent {
   name: string;
   title?: string;
   role: AgentRole;
+  /** A modeled formation can travel as one unit while still retaining state and knowledge. */
+  renderKind?: "person" | "unit";
   factionId: FactionId;
   biography: string;
   personality: PersonalityProfile;
@@ -295,12 +316,37 @@ export interface TimelineEvent {
   condition?: TimelineEventCondition;
 }
 
+/**
+ * Human-facing scenario language. Simulation primitives remain reusable while
+ * each historical world can name the pressures students are actually seeing.
+ */
+export interface ScenarioPresentation {
+  scene: WorldSceneTheme;
+  metricLabels?: {
+    morale: string;
+    supplies: string;
+    mobility: string;
+    cohesion: string;
+  };
+  causalThread?: {
+    title: string;
+    description: string;
+  };
+  mission?: {
+    title: string;
+    description: string;
+    steps: readonly string[];
+  };
+  whatIfPromptHint?: string;
+}
+
 export interface ScenarioDefinition {
   id: string;
   title: string;
   subtitle: string;
   era: string;
   historicalNote: string;
+  presentation?: ScenarioPresentation;
   maxTicks: number;
   locations: readonly ScenarioLocation[];
   agents: readonly ScenarioAgent[];

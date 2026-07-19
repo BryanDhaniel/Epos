@@ -12,6 +12,8 @@ import type {
   ScenarioLocation,
   WeatherState,
   WorldActionCue,
+  WorldSceneTheme,
+  WorldState,
 } from "@/lib/simulation/types";
 
 type Vector3Tuple = [number, number, number];
@@ -19,6 +21,9 @@ type Vector3Tuple = [number, number, number];
 export interface WorldSceneProps {
   agents: readonly AgentRuntimeState[];
   locations: readonly ScenarioLocation[];
+  factions: WorldState["factions"];
+  /** Explicit scene selection keeps visual geography separate from event prose. */
+  sceneTheme: WorldSceneTheme;
   selectedAgentId: string;
   weather: WeatherState;
   followSelected: boolean;
@@ -897,6 +902,160 @@ function FireAttackSequence() {
   );
 }
 
+function GunFlash({
+  position,
+  delay = 0,
+  scale = 1,
+  cadence = 2.1,
+}: {
+  position: Vector3Tuple;
+  delay?: number;
+  scale?: number;
+  cadence?: number;
+}) {
+  const flash = useRef<THREE.Mesh>(null);
+  const smoke = useRef<THREE.Group>(null);
+  const light = useRef<THREE.PointLight>(null);
+
+  useFrame(({ clock }) => {
+    const time = clock.elapsedTime + delay;
+    const cycle = (time % cadence) / cadence;
+    const blast = cycle < 0.16 ? 1 - cycle / 0.16 : 0;
+    const smokeRise = Math.min(1, cycle / 0.92);
+
+    if (flash.current) {
+      flash.current.scale.setScalar((0.18 + blast * 1.3) * scale);
+      (flash.current.material as THREE.MeshBasicMaterial).opacity = blast * 0.92;
+    }
+    if (light.current) light.current.intensity = blast * 4.4 * scale;
+    if (smoke.current) {
+      smoke.current.children.forEach((particle, index) => {
+        const spread = 0.12 + smokeRise * 0.34;
+        particle.position.set(
+          Math.sin(time * 0.8 + index * 1.7) * spread,
+          0.36 + smokeRise * (0.7 + index * 0.13),
+          Math.cos(time * 0.7 + index * 1.3) * spread,
+        );
+        particle.scale.setScalar((0.16 + smokeRise * 0.58) * scale);
+        (particle as THREE.Mesh).visible = cycle < 0.92;
+      });
+    }
+  });
+
+  return (
+    <group position={position}>
+      <mesh ref={flash} position={[0, 0.38, 0]} rotation={[0.2, 0.2, 0]}>
+        <octahedronGeometry args={[0.5, 0]} />
+        <meshBasicMaterial color="#ffd98a" transparent opacity={0} />
+      </mesh>
+      <group ref={smoke}>
+        {[0, 1, 2, 3].map((index) => (
+          <mesh key={index} castShadow>
+            <dodecahedronGeometry args={[0.32, 0]} />
+            <meshStandardMaterial color="#596067" transparent opacity={0.44} roughness={1} flatShading />
+          </mesh>
+        ))}
+      </group>
+      <pointLight ref={light} color="#ffc46d" distance={5.6} intensity={0} position={[0, 0.62, 0]} />
+    </group>
+  );
+}
+
+function RainCurtain() {
+  const drops = useRef<THREE.Group>(null);
+  const dropLayout = useMemo(
+    () =>
+      Array.from({ length: 52 }, (_, index) => ({
+        x: ((index * 37) % 31) - 15.5,
+        z: ((index * 19) % 23) - 11.5,
+        offset: (index * 0.19) % 1,
+      })),
+    [],
+  );
+
+  useFrame(({ clock }) => {
+    if (!drops.current) return;
+    drops.current.children.forEach((drop, index) => {
+      const layout = dropLayout[index];
+      const fall = (clock.elapsedTime * 1.9 + layout.offset) % 1;
+      drop.position.set(layout.x, 5.8 - fall * 7.2, layout.z);
+    });
+  });
+
+  return (
+    <group ref={drops}>
+      {dropLayout.map((layout, index) => (
+        <mesh key={index} position={[layout.x, 0, layout.z]} rotation={[0.24, 0, 0.14]}>
+          <boxGeometry args={[0.018, 0.62 + (index % 3) * 0.1, 0.018]} />
+          <meshBasicMaterial color="#c6d9e0" transparent opacity={0.34} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function WaterlooBattleSequence({
+  action,
+  eventId,
+}: {
+  action: Exclude<WorldActionCue, "fire-attack">;
+  eventId?: string;
+}) {
+  if (action === "rain-field") {
+    return <RainCurtain />;
+  }
+
+  if (action === "artillery-barrage") {
+    // The flash is mounted on the real French gun models in WaterlooScenery.
+    return null;
+  }
+
+  if (action === "farm-assault") {
+    const isHougoumont = eventId === "hougoumont-holds";
+    return (
+      <group>
+        {isHougoumont ? (
+          <>
+            <GunFlash position={[-2.75, 0.14, 4.24]} delay={0.2} scale={0.28} cadence={1.15} />
+            <GunFlash position={[-0.78, 0.14, 5.12]} delay={0.72} scale={0.22} cadence={1.3} />
+          </>
+        ) : (
+          <>
+            <GunFlash position={[0.55, 0.14, 0.24]} delay={0.22} scale={0.28} cadence={1.18} />
+            <GunFlash position={[1.52, 0.14, 0.48]} delay={0.68} scale={0.22} cadence={1.32} />
+          </>
+        )}
+      </group>
+    );
+  }
+
+  if (action === "cavalry-charge") {
+    return (
+      <group>
+        <GunFlash position={[-2.7, 0.12, 2.05]} delay={0.2} scale={0.18} cadence={1.1} />
+        <GunFlash position={[1.55, 0.12, 2.66]} delay={0.74} scale={0.18} cadence={1.35} />
+      </group>
+    );
+  }
+
+  if (action === "reinforcement-arrival") {
+    // Blücher and the modeled vanguard move through the actual eastern route.
+    return null;
+  }
+
+  if (action === "final-assault") {
+    return (
+      <group>
+        <GunFlash position={[-2.48, 0.12, 1.92]} delay={0.12} scale={0.25} cadence={1.35} />
+        <GunFlash position={[2.42, 0.12, 3.02]} delay={0.59} scale={0.24} cadence={1.48} />
+      </group>
+    );
+  }
+
+  // Withdrawal deliberately has no continuing fire effect.
+  return null;
+}
+
 function Mountain({ position, scale = 1, color = "#78988a" }: { position: Vector3Tuple; scale?: number; color?: string }) {
   return (
     <mesh castShadow receiveShadow position={position} scale={scale} rotation={[0.15, 0.35, -0.1]}>
@@ -930,12 +1089,56 @@ function Campfire({ position }: { position: Vector3Tuple }) {
   );
 }
 
+function UnitFormation({ color, trim }: { color: string; trim: string }) {
+  const ranks: readonly [number, number][] = [
+    [-0.26, -0.3], [0.26, -0.3],
+    [-0.26, 0.02], [0.26, 0.02],
+    [-0.26, 0.34], [0.26, 0.34],
+  ];
+
+  return (
+    <group position={[0, 0.02, 0]}>
+      {ranks.map(([x, z], index) => (
+        <group key={`${x}-${z}`} position={[x, 0, z]}>
+          <mesh castShadow position={[0, 0.3, 0]}>
+            <cylinderGeometry args={[0.085, 0.105, 0.36, 5]} />
+            <meshStandardMaterial color={color} roughness={0.86} flatShading />
+          </mesh>
+          <mesh castShadow position={[0, 0.56, 0]}>
+            <sphereGeometry args={[0.078, 7, 5]} />
+            <meshStandardMaterial color="#d9ad88" roughness={0.92} flatShading />
+          </mesh>
+          <mesh castShadow position={[0.075, 0.42, -0.13]} rotation={[Math.PI / 2, 0, 0.12]}>
+            <cylinderGeometry args={[0.014, 0.014, 0.62, 5]} />
+            <meshStandardMaterial color="#635346" roughness={0.95} />
+          </mesh>
+          {index < 2 && (
+            <mesh castShadow position={[0, 0.685, 0]} scale={[1.08, 0.38, 1.08]}>
+              <sphereGeometry args={[0.09, 7, 5]} />
+              <meshStandardMaterial color={trim} roughness={0.86} flatShading />
+            </mesh>
+          )}
+        </group>
+      ))}
+      <mesh castShadow position={[-0.42, 0.76, 0.46]}>
+        <cylinderGeometry args={[0.018, 0.018, 1.48, 5]} />
+        <meshStandardMaterial color="#6b543e" roughness={0.95} />
+      </mesh>
+      <mesh castShadow position={[-0.28, 1.17, 0.46]} rotation={[0, Math.PI / 2, 0]}>
+        <planeGeometry args={[0.42, 0.28]} />
+        <meshStandardMaterial color={color} side={THREE.DoubleSide} roughness={0.84} />
+      </mesh>
+    </group>
+  );
+}
+
 function AgentMarker({
   agent,
   position,
   selected,
   message,
   recipientName,
+  factionColor,
   onSelect,
 }: {
   agent: AgentRuntimeState;
@@ -943,6 +1146,7 @@ function AgentMarker({
   selected: boolean;
   message?: AgentMessage;
   recipientName?: string;
+  factionColor?: string;
   onSelect: (agentId: string) => void;
 }) {
   const [targetX, targetY, targetZ] = position;
@@ -963,7 +1167,7 @@ function AgentMarker({
     isMoving: false,
   });
   const travelDirection = useMemo(() => new THREE.Vector3(), []);
-  const color = factionColors[agent.factionId] ?? factionColors.neutral;
+  const color = factionColor ?? factionColors[agent.factionId] ?? factionColors.neutral;
   const trim = factionTrimColors[agent.factionId] ?? factionTrimColors.neutral;
   const skin = skinTones[stableVariant(agent.id, skinTones.length)];
   const hair = hairColors[stableVariant(`${agent.id}-hair`, hairColors.length)];
@@ -1062,6 +1266,9 @@ function AgentMarker({
           <meshBasicMaterial color="#f2c75c" transparent opacity={0.93} side={THREE.DoubleSide} />
         </mesh>
       )}
+      {agent.renderKind === "unit" ? (
+        <UnitFormation color={color} trim={trim} />
+      ) : (
       <group ref={figure}>
         <mesh castShadow position={[0, 0.72, -0.155]} rotation={[0.08, 0, 0]}>
           <boxGeometry args={[0.36, 0.48, 0.05]} />
@@ -1153,6 +1360,7 @@ function AgentMarker({
         </group>
         <RoleAccessory role={agent.role} color={color} trim={trim} />
       </group>
+      )}
       {message && (
         <Html position={[0, 2.42, 0]} center distanceFactor={10.5} style={{ pointerEvents: "none" }}>
           <div className="agent-speech is-speaking" aria-hidden="true">
@@ -1185,6 +1393,226 @@ function FollowCamera({ target, enabled }: { target: Vector3Tuple; enabled: bool
   });
 
   return null;
+}
+
+function Hedgerow({
+  position,
+  length,
+  rotation = 0,
+}: {
+  position: Vector3Tuple;
+  length: number;
+  rotation?: number;
+}) {
+  const shrubCount = Math.max(3, Math.round(length * 1.35));
+
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <mesh castShadow receiveShadow position={[0, 0.12, 0]}>
+        <boxGeometry args={[length, 0.22, 0.23]} />
+        <meshStandardMaterial color="#506b3c" roughness={1} />
+      </mesh>
+      {Array.from({ length: shrubCount }, (_, index) => {
+        const progress = shrubCount === 1 ? 0 : index / (shrubCount - 1);
+        const x = (progress - 0.5) * length;
+        const height = 0.28 + (index % 3) * 0.045;
+        return (
+          <mesh key={index} castShadow position={[x, 0.25 + height * 0.5, index % 2 ? 0.035 : -0.035]}>
+            <sphereGeometry args={[0.22 + (index % 2) * 0.035, 6, 5]} />
+            <meshStandardMaterial color={index % 2 ? "#667f45" : "#58743f"} roughness={0.97} flatShading />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+function MudRoad({
+  position,
+  length,
+  width = 1.45,
+  rotation = 0,
+}: {
+  position: Vector3Tuple;
+  length: number;
+  width?: number;
+  rotation?: number;
+}) {
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.105, 0]}>
+        <planeGeometry args={[width, length]} />
+        <meshStandardMaterial color="#766650" roughness={1} />
+      </mesh>
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[-width * 0.22, -0.1, 0]}>
+        <planeGeometry args={[0.13, length * 0.94]} />
+        <meshStandardMaterial color="#5f5547" roughness={1} />
+      </mesh>
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[width * 0.22, -0.1, 0]}>
+        <planeGeometry args={[0.13, length * 0.94]} />
+        <meshStandardMaterial color="#5f5547" roughness={1} />
+      </mesh>
+    </group>
+  );
+}
+
+function WaterlooFarmstead({
+  position,
+  scale = 1,
+  roof = "#57463d",
+  wall = "#a88e72",
+}: {
+  position: Vector3Tuple;
+  scale?: number;
+  roof?: string;
+  wall?: string;
+}) {
+  return (
+    <group position={position} scale={scale}>
+      <mesh castShadow receiveShadow position={[0, 0.44, 0]}>
+        <boxGeometry args={[2.35, 0.86, 1.35]} />
+        <meshStandardMaterial color={wall} roughness={0.98} />
+      </mesh>
+      <mesh castShadow position={[0, 1.12, 0]} rotation={[0, Math.PI / 4, 0]} scale={[1.42, 0.55, 0.84]}>
+        <coneGeometry args={[1, 1, 4]} />
+        <meshStandardMaterial color={roof} roughness={0.93} flatShading />
+      </mesh>
+      <mesh castShadow position={[-0.84, 0.47, 0.69]}>
+        <boxGeometry args={[0.42, 0.6, 0.045]} />
+        <meshStandardMaterial color="#453b34" roughness={0.95} />
+      </mesh>
+      {[-0.5, 0.32, 0.85].map((x) => (
+        <mesh key={x} position={[x, 0.58, 0.695]}>
+          <boxGeometry args={[0.21, 0.23, 0.035]} />
+          <meshStandardMaterial color="#d2d7cf" roughness={0.8} />
+        </mesh>
+      ))}
+      <mesh castShadow position={[-1.5, 0.2, 0.65]}>
+        <boxGeometry args={[0.23, 0.4, 3.05]} />
+        <meshStandardMaterial color="#87735f" roughness={1} />
+      </mesh>
+      <mesh castShadow position={[1.5, 0.2, 0.65]}>
+        <boxGeometry args={[0.23, 0.4, 3.05]} />
+        <meshStandardMaterial color="#87735f" roughness={1} />
+      </mesh>
+      <mesh castShadow position={[0, 0.2, 2.08]}>
+        <boxGeometry args={[3.2, 0.4, 0.23]} />
+        <meshStandardMaterial color="#87735f" roughness={1} />
+      </mesh>
+    </group>
+  );
+}
+
+function FieldGun({
+  position,
+  rotation = 0,
+  color = "#303a3b",
+  firing = false,
+  firingDelay = 0,
+}: {
+  position: Vector3Tuple;
+  rotation?: number;
+  color?: string;
+  firing?: boolean;
+  firingDelay?: number;
+}) {
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <mesh castShadow position={[0, 0.32, -0.18]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.09, 0.12, 1.22, 8]} />
+        <meshStandardMaterial color={color} roughness={0.6} metalness={0.35} />
+      </mesh>
+      <mesh castShadow position={[0, 0.21, 0.32]}>
+        <boxGeometry args={[0.42, 0.18, 0.64]} />
+        <meshStandardMaterial color="#795a3e" roughness={0.94} />
+      </mesh>
+      {[-0.33, 0.33].map((x) => (
+        <mesh key={x} castShadow position={[x, 0.2, 0.37]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.23, 0.23, 0.09, 10]} />
+          <meshStandardMaterial color="#493d35" roughness={0.98} />
+        </mesh>
+      ))}
+      {firing && <GunFlash position={[0, 0.28, -0.78]} delay={firingDelay} scale={0.58} cadence={2.55} />}
+    </group>
+  );
+}
+
+function WaterlooScenery({
+  weather,
+  activeAction,
+}: {
+  weather: WeatherState;
+  activeAction?: Exclude<WorldActionCue, "fire-attack">;
+}) {
+  const rainy = weather.condition === "rain" || weather.condition === "storm";
+  const skyColor = rainy ? "#87939c" : "#aeb9a2";
+  const sunPosition: Vector3Tuple = rainy ? [-10, 6, 4] : [-11, 10, 6];
+
+  return (
+    <>
+      <Sky distance={450000} sunPosition={sunPosition} turbidity={rainy ? 15 : 9} rayleigh={rainy ? 0.45 : 0.86} mieCoefficient={0.009} mieDirectionalG={0.79} />
+      <fog attach="fog" args={[skyColor, 19, 46]} />
+      <hemisphereLight args={["#d6dce0", "#3e4b32", 1.85]} />
+      <directionalLight castShadow position={sunPosition} intensity={rainy ? 1.45 : 2.05} color={rainy ? "#d8e1e7" : "#fff0cb"} shadow-mapSize-width={1536} shadow-mapSize-height={1536} shadow-bias={-0.00018} />
+      <directionalLight position={[11, 7, -10]} intensity={0.42} color="#a7bed1" />
+
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.15, 0]}>
+        <planeGeometry args={[46, 32]} />
+        <meshStandardMaterial color={rainy ? "#61754b" : "#73895b"} roughness={1} />
+      </mesh>
+      <mesh receiveShadow position={[-0.4, -1.52, 6.3]} scale={[13.8, 1.55, 3.7]}>
+        <sphereGeometry args={[1, 16, 8]} />
+        <meshStandardMaterial color={rainy ? "#5d734c" : "#708957"} roughness={1} flatShading />
+      </mesh>
+      <mesh receiveShadow position={[6.8, -1.45, -4.7]} scale={[8.2, 1.35, 3.6]}>
+        <sphereGeometry args={[1, 14, 8]} />
+        <meshStandardMaterial color="#5c7049" roughness={1} flatShading />
+      </mesh>
+
+      <MudRoad position={[5.2, -0.1, -0.9]} length={23} width={1.55} rotation={0.56} />
+      <MudRoad position={[-2.1, -0.1, 3.85]} length={10.8} width={1.1} rotation={1.24} />
+      <TerrainPatch position={[-5.6, -0.13, -2.1]} scale={[5.5, 3.3, 1]} color="#7e8750" rotation={0.12} />
+      <TerrainPatch position={[5.8, -0.13, 3.1]} scale={[5.8, 3.1, 1]} color="#8d9357" rotation={-0.18} />
+      <TerrainPatch position={[-10.2, -0.13, 5.4]} scale={[4.8, 2.6, 1]} color="#77884f" rotation={0.22} />
+
+      <WaterlooFarmstead position={[1.2, 0, 0.2]} scale={1.02} wall="#a99679" />
+      <WaterlooFarmstead position={[-0.7, 0, 5.5]} scale={1.18} wall="#917c64" roof="#493b35" />
+      <WaterlooFarmstead position={[7.2, 0, -4.55]} scale={0.86} wall="#aa9478" roof="#625046" />
+      <Tent position={[-8.2, 0.02, -1.7]} color="#6d8190" rotation={0.22} scale={1.04} />
+      <Tent position={[-6.25, 0.02, -3.85]} color="#627687" rotation={-0.27} scale={0.88} />
+      <Tent position={[1.35, 0.02, 4.85]} color="#9e845d" rotation={-0.32} scale={0.9} />
+      <Tent position={[3.55, 0.02, 4.65]} color="#a58c66" rotation={0.2} scale={0.78} />
+      <FieldGun position={[-6.1, 0.02, -2.15]} rotation={0.6} color="#313b47" firing={activeAction === "artillery-barrage"} firingDelay={0.1} />
+      <FieldGun position={[-4.45, 0.02, -1.25]} rotation={0.5} color="#313b47" firing={activeAction === "artillery-barrage"} firingDelay={1.22} />
+      <FieldGun position={[2.15, 0.02, 4.1]} rotation={-2.48} color="#40484b" />
+      <FieldGun position={[3.7, 0.02, 3.78]} rotation={-2.6} color="#40484b" />
+
+      <Hedgerow position={[-2.4, 0, -1.9]} length={5.2} rotation={0.42} />
+      <Hedgerow position={[2.5, 0, 2.45]} length={5.8} rotation={-0.26} />
+      <Hedgerow position={[-7.6, 0, 0.15]} length={5.2} rotation={1.25} />
+      <Hedgerow position={[5.1, 0, 1.55]} length={6.3} rotation={0.5} />
+      <Hedgerow position={[-1.9, 0, 7.55]} length={10.8} rotation={0.08} />
+
+      {([
+        [-14.6, 0, 6.8], [-13.2, 0, 4.3], [-11.9, 0, 7.9], [-10.5, 0, 5.7], [-9.2, 0, 8.7],
+        [-6.9, 0, 8.5], [-4.8, 0, 9.1], [1.8, 0, 8.9], [4.7, 0, 8.0], [7.1, 0, 8.8],
+        [10.2, 0, 7.5], [13.1, 0, 8.9], [15.1, 0, 6.5], [-15.2, 0, -6.2], [-12.8, 0, -8.0],
+        [-10.7, 0, -7.1], [-7.7, 0, -8.9], [-4.9, 0, -7.6], [10.7, 0, -7.9], [13.2, 0, -8.6],
+        [15.5, 0, -6.6], [11.9, 0, 1.2], [13.8, 0, 2.8],
+      ] as Vector3Tuple[]).map((position, index) => (
+        <Tree key={`waterloo-tree-${position[0]}-${position[2]}`} position={position} scale={0.86 + (index % 4) * 0.13} />
+      ))}
+
+      {([
+        [-15.5, 2.2, -10.4], [-10.6, 2.5, -11.5], [-5.3, 2.2, -11.1], [4.8, 2.5, -11.8],
+        [11.2, 2.7, -10.7], [16.2, 2.3, -9.2], [-15, 2.3, 11.2], [-8, 2.1, 12.1],
+        [8.7, 2.3, 12.4], [15.4, 2.2, 10.4],
+      ] as Vector3Tuple[]).map((position, index) => (
+        <Mountain key={`waterloo-horizon-${index}`} position={position} scale={3.5 + (index % 3) * 0.65} color={index % 2 ? "#6e805e" : "#637653"} />
+      ))}
+      <ContactShadows position={[0, -0.115, 0]} opacity={0.36} scale={44} blur={2.5} far={10} color="#35402d" />
+    </>
+  );
 }
 
 function Scenery({ weather, fireAttackActive }: { weather: WeatherState; fireAttackActive: boolean }) {
@@ -1294,6 +1722,8 @@ function Scenery({ weather, fireAttackActive }: { weather: WeatherState; fireAtt
 function SceneContent({
   agents,
   locations,
+  factions,
+  sceneTheme,
   selectedAgentId,
   weather,
   followSelected,
@@ -1318,19 +1748,33 @@ function SceneContent({
     () => new Map(agents.map((agent) => [agent.id, agent.name])),
     [agents],
   );
-  const fireAttackActive = activeEvent?.action === "fire-attack";
+  const fireAttackActive = sceneTheme === "red-cliffs" && activeEvent?.action === "fire-attack";
+  const waterlooAction: Exclude<WorldActionCue, "fire-attack"> | undefined =
+    sceneTheme === "waterloo" && activeEvent?.action && activeEvent.action !== "fire-attack"
+      ? activeEvent.action
+      : undefined;
 
   return (
     <>
-      <Scenery weather={weather} fireAttackActive={fireAttackActive} />
+      {sceneTheme === "waterloo" ? (
+        <WaterlooScenery weather={weather} activeAction={waterlooAction} />
+      ) : (
+        <Scenery weather={weather} fireAttackActive={fireAttackActive} />
+      )}
       {fireAttackActive && <FireAttackSequence key={activeEvent?.id ?? "fire-attack"} />}
+      {waterlooAction && (
+        <WaterlooBattleSequence
+          key={activeEvent?.id ?? waterlooAction}
+          action={waterlooAction}
+          eventId={activeEvent?.id}
+        />
+      )}
       <FollowCamera target={target} enabled={followSelected} />
       {agents.map((agent, index) => {
         const location = locationPositions.get(agent.currentLocationId);
         const offset = offsets[index % offsets.length];
-        // Cao Cao's marker is placed on the raised deck of the visibly marked
-        // command flagship, making the fire-ship sequence legible at a glance.
-        const surfaceHeight = agent.id === "cao-cao" ? 0.79 : location?.y ?? 0;
+        // Cao Cao's marker sits on the raised deck only in the Red Cliffs scene.
+        const surfaceHeight = sceneTheme === "red-cliffs" && agent.id === "cao-cao" ? 0.79 : location?.y ?? 0;
         const position: Vector3Tuple = location
           ? [location.x + offset[0], surfaceHeight, location.z + offset[2]]
           : [0, 0, 0];
@@ -1342,6 +1786,7 @@ function SceneContent({
             selected={agent.id === selectedAgentId}
             message={messagesBySpeaker.get(agent.id)}
             recipientName={messagesBySpeaker.get(agent.id)?.recipientId ? agentNames.get(messagesBySpeaker.get(agent.id)?.recipientId ?? "") : undefined}
+            factionColor={factions[agent.factionId]?.color}
             onSelect={onSelectAgent}
           />
         );

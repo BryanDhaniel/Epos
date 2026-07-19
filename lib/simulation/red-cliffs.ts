@@ -12,6 +12,27 @@ export const RED_CLIFFS_SCENARIO = {
   era: "Late Han dynasty · 208 CE",
   historicalNote:
     "The scenario distinguishes its historical anchors from calculated outcomes. Exact numbers, individual dialogue, and counterfactual consequences are modeled inferences rather than established facts.",
+  presentation: {
+    scene: "red-cliffs",
+    metricLabels: {
+      morale: "Coalition morale",
+      supplies: "Supply resilience",
+      mobility: "River mobility",
+      cohesion: "Alliance cohesion",
+    },
+    causalThread: {
+      title: "Illness → readiness → fleet formation",
+      description:
+        "Disease risk is {diseaseRisk}/100. Watch how it influences decisions without making any one factor a complete explanation.",
+    },
+    mission: {
+      title: "Trace the fragile alliance",
+      description:
+        "Identify how weather, health, and trust shape the coalition’s choices. Follow reports instead of assuming a leader knows everything.",
+      steps: ["Council", "Camp report", "Test plan"],
+    },
+    whatIfPromptHint: "Try: What if supplies doubled?",
+  },
   maxTicks: 8,
   locations: [
     {
