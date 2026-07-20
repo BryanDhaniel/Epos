@@ -18,6 +18,12 @@ export const BATTLEFIELD_AUDIO_CUES = [
   "ceasefire",
   "aid-corridor",
   "urban-assault",
+  "siege-arrival",
+  "water-scarcity",
+  "siege-engine-build",
+  "siege-assault",
+  "siege-parley",
+  "siege-aftermath",
 ] as const;
 
 export type BattlefieldAudioCue = WorldActionCue;
@@ -35,6 +41,13 @@ export const BATTLEFIELD_AMBIENCE_CUES = [
   "surabaya-urban-pressure",
   "surabaya-aid-route",
   "surabaya-aftermath",
+  "jerusalem-dry-morning",
+  "jerusalem-siege-camp",
+  "jerusalem-city-strain",
+  "jerusalem-assault-pressure",
+  "jerusalem-parley",
+  "jerusalem-departure",
+  "jerusalem-aftermath",
 ] as const;
 
 export type BattlefieldAmbienceCue = (typeof BATTLEFIELD_AMBIENCE_CUES)[number];
@@ -74,6 +87,8 @@ type NoiseOptions = {
   level: number;
   lowpass: number;
   highpass?: number;
+  /** Fraction of the bed to hold before its release envelope begins. */
+  releaseStartFraction?: number;
 };
 
 type ToneOptions = {
@@ -90,6 +105,7 @@ type WebkitAudioWindow = Window & {
 };
 
 const DEFAULT_CUE: BattlefieldAudioCue = "artillery-barrage";
+const JERUSALEM_AMBIENCE_DURATION = 42;
 
 function getAudioContextConstructor() {
   if (typeof window === "undefined") return null;
@@ -170,7 +186,10 @@ function scheduleNoise(
   const lowpass = context.createBiquadFilter();
   const gain = context.createGain();
   const attackEnd = Math.min(options.at + 0.025, options.at + options.duration * 0.18);
-  const releaseStart = Math.max(attackEnd, options.at + options.duration * 0.54);
+  const releaseStart = Math.max(
+    attackEnd,
+    options.at + options.duration * (options.releaseStartFraction ?? 0.54),
+  );
 
   source.buffer = buffer;
   if (highpass) {
@@ -593,6 +612,263 @@ function scheduleAftermathAmbience(graph: AudioGraph, at: number) {
   );
 }
 
+function scheduleJerusalemDryMorningAmbience(graph: AudioGraph, at: number) {
+  // A longer, finite wind bed keeps the city audible throughout a narrated
+  // moment. It remains deliberately understated under the voice-over.
+  scheduleNoise(
+    graph,
+    {
+      at,
+      duration: JERUSALEM_AMBIENCE_DURATION,
+      level: 0.046,
+      lowpass: 760,
+      highpass: 58,
+      releaseStartFraction: 0.88,
+    },
+    "ambience",
+  );
+  for (let index = 0; index < 7; index += 1) {
+    scheduleNoise(
+      graph,
+      {
+        at: at + 1.35 + index * 5.65,
+        duration: 0.82,
+        level: 0.016,
+        lowpass: 1_240,
+        highpass: 156,
+      },
+      "ambience",
+    );
+  }
+}
+
+function scheduleJerusalemSiegeCampAmbience(graph: AudioGraph, at: number) {
+  scheduleJerusalemDryMorningAmbience(graph, at);
+  scheduleNoise(
+    graph,
+    {
+      at: at + 0.18,
+      duration: 37,
+      level: 0.018,
+      lowpass: 500,
+      highpass: 82,
+      releaseStartFraction: 0.86,
+    },
+    "ambience",
+  );
+  scheduleSoftFootsteps(graph, at + 0.58, 14, 2.48, 0.02, "ambience");
+  [2.7, 8.1, 13.6, 19.2, 25.3, 31.4].forEach((offset, index) => {
+    scheduleTimberWork(graph, at + offset, 0.72 - (index % 2) * 0.08, "ambience");
+  });
+  scheduleNoise(
+    graph,
+    {
+      at: at + 16.4,
+      duration: 0.38,
+      level: 0.02,
+      lowpass: 780,
+      highpass: 134,
+    },
+    "ambience",
+  );
+}
+
+function scheduleJerusalemCityStrainAmbience(graph: AudioGraph, at: number) {
+  scheduleJerusalemDryMorningAmbience(graph, at);
+  scheduleNoise(
+    graph,
+    {
+      at: at + 0.16,
+      duration: 36,
+      level: 0.022,
+      lowpass: 980,
+      highpass: 118,
+      releaseStartFraction: 0.86,
+    },
+    "ambience",
+  );
+  scheduleSoftFootsteps(graph, at + 0.32, 13, 2.62, 0.018, "ambience");
+  [3.15, 10.7, 18.3, 26.1, 33.2].forEach((offset, index) => {
+    scheduleTravelCreak(graph, at + offset, 0.82 - (index % 2) * 0.1, "ambience");
+  });
+}
+
+function scheduleJerusalemAssaultPressureAmbience(graph: AudioGraph, at: number) {
+  scheduleJerusalemDryMorningAmbience(graph, at);
+  scheduleNoise(
+    graph,
+    {
+      at: at + 0.1,
+      duration: 36,
+      level: 0.026,
+      lowpass: 620,
+      highpass: 74,
+      releaseStartFraction: 0.86,
+    },
+    "ambience",
+  );
+  scheduleSoftFootsteps(graph, at + 0.42, 16, 2.08, 0.019, "ambience");
+  [1.35, 5.6, 10.25, 15.8, 21.6, 28.4].forEach((offset, index) => {
+    scheduleSiegeImpact(graph, at + offset, 0.48 - (index % 3) * 0.05, "ambience");
+  });
+  [3.2, 12.7, 24.3].forEach((offset) => {
+    scheduleTimberWork(graph, at + offset, 0.7, "ambience");
+  });
+}
+
+function scheduleJerusalemParleyAmbience(graph: AudioGraph, at: number) {
+  scheduleJerusalemDryMorningAmbience(graph, at);
+  scheduleNoise(
+    graph,
+    {
+      at: at + 0.2,
+      duration: 32,
+      level: 0.015,
+      lowpass: 520,
+      highpass: 72,
+      releaseStartFraction: 0.86,
+    },
+    "ambience",
+  );
+  scheduleSoftFootsteps(graph, at + 0.7, 9, 3.05, 0.016, "ambience");
+  [5.4, 16.1, 26.8].forEach((offset) => {
+    scheduleTone(
+      graph,
+      {
+        at: at + offset,
+        duration: 0.22,
+        level: 0.009,
+        frequency: 176,
+        endFrequency: 128,
+        type: "triangle",
+      },
+      "ambience",
+    );
+  });
+}
+
+function scheduleJerusalemDepartureAmbience(graph: AudioGraph, at: number) {
+  scheduleJerusalemDryMorningAmbience(graph, at);
+  scheduleNoise(
+    graph,
+    {
+      at: at + 0.14,
+      duration: 37,
+      level: 0.019,
+      lowpass: 640,
+      highpass: 74,
+      releaseStartFraction: 0.86,
+    },
+    "ambience",
+  );
+  scheduleSoftFootsteps(graph, at + 0.5, 16, 2.1, 0.019, "ambience");
+  [2.2, 8.7, 15.4, 22.2, 29.4].forEach((offset, index) => {
+    scheduleTravelCreak(graph, at + offset, 0.9 - (index % 2) * 0.08, "ambience");
+  });
+  scheduleNoise(
+    graph,
+    {
+      at: at + 19.6,
+      duration: 0.54,
+      level: 0.018,
+      lowpass: 410,
+      highpass: 68,
+    },
+    "ambience",
+  );
+}
+
+function scheduleJerusalemAftermathAmbience(graph: AudioGraph, at: number) {
+  scheduleJerusalemDryMorningAmbience(graph, at);
+  scheduleNoise(
+    graph,
+    {
+      at: at + 0.18,
+      duration: 33,
+      level: 0.013,
+      lowpass: 500,
+      highpass: 64,
+      releaseStartFraction: 0.86,
+    },
+    "ambience",
+  );
+  scheduleSoftFootsteps(graph, at + 1.1, 8, 3.5, 0.014, "ambience");
+  [9.6, 23.4].forEach((offset) => {
+    scheduleTravelCreak(graph, at + offset, 0.58, "ambience");
+  });
+}
+
+/** Period-appropriate low wood-and-stone pressure; deliberately not artillery. */
+function scheduleSiegeImpact(
+  graph: AudioGraph,
+  at: number,
+  intensity = 1,
+  layer: AudioSourceLayer = "effect",
+) {
+  scheduleTone(graph, {
+    at,
+    duration: 0.28,
+    level: 0.062 * intensity,
+    frequency: 92,
+    endFrequency: 52,
+    type: "triangle",
+  }, layer);
+  scheduleNoise(graph, {
+    at: at + 0.018,
+    duration: 0.42,
+    level: 0.052 * intensity,
+    lowpass: 620,
+    highpass: 82,
+  }, layer);
+}
+
+function scheduleTimberWork(
+  graph: AudioGraph,
+  at: number,
+  intensity = 1,
+  layer: AudioSourceLayer = "effect",
+) {
+  scheduleNoise(graph, {
+    at,
+    duration: 0.14,
+    level: 0.034 * intensity,
+    lowpass: 1_050,
+    highpass: 170,
+  }, layer);
+  scheduleTone(graph, {
+    at: at + 0.008,
+    duration: 0.1,
+    level: 0.016 * intensity,
+    frequency: 188,
+    endFrequency: 114,
+    type: "triangle",
+  }, layer);
+}
+
+/** A brief wooden-wheel / carried-vessel texture for routes and queues. */
+function scheduleTravelCreak(
+  graph: AudioGraph,
+  at: number,
+  intensity = 1,
+  layer: AudioSourceLayer = "effect",
+) {
+  scheduleNoise(graph, {
+    at,
+    duration: 0.18,
+    level: 0.018 * intensity,
+    lowpass: 1_260,
+    highpass: 180,
+  }, layer);
+  scheduleTone(graph, {
+    at: at + 0.018,
+    duration: 0.12,
+    level: 0.01 * intensity,
+    frequency: 246,
+    endFrequency: 168,
+    type: "triangle",
+  }, layer);
+}
+
 function scheduleAmbience(graph: AudioGraph, cue: BattlefieldAmbienceCue) {
   const now = graph.context.currentTime + 0.04;
 
@@ -614,6 +890,27 @@ function scheduleAmbience(graph: AudioGraph, cue: BattlefieldAmbienceCue) {
       return;
     case "surabaya-aftermath":
       scheduleAftermathAmbience(graph, now);
+      return;
+    case "jerusalem-dry-morning":
+      scheduleJerusalemDryMorningAmbience(graph, now);
+      return;
+    case "jerusalem-siege-camp":
+      scheduleJerusalemSiegeCampAmbience(graph, now);
+      return;
+    case "jerusalem-city-strain":
+      scheduleJerusalemCityStrainAmbience(graph, now);
+      return;
+    case "jerusalem-assault-pressure":
+      scheduleJerusalemAssaultPressureAmbience(graph, now);
+      return;
+    case "jerusalem-parley":
+      scheduleJerusalemParleyAmbience(graph, now);
+      return;
+    case "jerusalem-departure":
+      scheduleJerusalemDepartureAmbience(graph, now);
+      return;
+    case "jerusalem-aftermath":
+      scheduleJerusalemAftermathAmbience(graph, now);
       return;
   }
 }
@@ -737,6 +1034,105 @@ function scheduleCue(graph: AudioGraph, cue: BattlefieldAudioCue) {
       scheduleMusketVolley(graph, now + 3.16, 2, 0.27);
       scheduleCannonBlast(graph, now + 5.2, 0.36);
       return;
+    case "siege-arrival":
+      scheduleNoise(graph, {
+        at: now + 0.06,
+        duration: 7.4,
+        level: 0.021,
+        lowpass: 650,
+        highpass: 82,
+      });
+      scheduleSoftFootsteps(graph, now + 0.08, 18, 0.38, 0.024, "effect");
+      scheduleTimberWork(graph, now + 1.8, 0.52);
+      scheduleTimberWork(graph, now + 4.65, 0.44);
+      scheduleNoise(graph, {
+        at: now + 3.35,
+        duration: 0.34,
+        level: 0.022,
+        lowpass: 780,
+        highpass: 118,
+      });
+      return;
+    case "water-scarcity":
+      scheduleSoftFootsteps(graph, now + 0.12, 10, 0.48, 0.017, "effect");
+      scheduleTravelCreak(graph, now + 0.46, 0.84);
+      scheduleTravelCreak(graph, now + 2.5, 0.72);
+      scheduleNoise(graph, {
+        at: now + 0.18,
+        duration: 4.8,
+        level: 0.016,
+        lowpass: 960,
+        highpass: 156,
+      });
+      scheduleTone(graph, {
+        at: now + 0.58,
+        duration: 0.24,
+        level: 0.014,
+        frequency: 218,
+        endFrequency: 162,
+        type: "triangle",
+      });
+      return;
+    case "siege-engine-build":
+      scheduleNoise(graph, {
+        at: now + 0.08,
+        duration: 8.4,
+        level: 0.02,
+        lowpass: 700,
+        highpass: 104,
+      });
+      scheduleTimberWork(graph, now + 0.18, 1.04);
+      scheduleTimberWork(graph, now + 1.12, 0.94);
+      scheduleTimberWork(graph, now + 2.06, 0.82);
+      scheduleTimberWork(graph, now + 3.54, 0.8);
+      scheduleTimberWork(graph, now + 5.18, 0.76);
+      scheduleTimberWork(graph, now + 6.8, 0.66);
+      scheduleSoftFootsteps(graph, now + 0.42, 13, 0.54, 0.016, "effect");
+      return;
+    case "siege-assault":
+      // A finite, period-appropriate wood-and-stone sequence follows the
+      // tower animation without turning the siege into artillery spectacle.
+      scheduleNoise(graph, {
+        at: now + 0.08,
+        duration: 9.2,
+        level: 0.028,
+        lowpass: 620,
+        highpass: 72,
+      });
+      scheduleSoftFootsteps(graph, now + 0.18, 15, 0.52, 0.018, "effect");
+      scheduleSiegeImpact(graph, now + 0.45, 0.82);
+      scheduleTimberWork(graph, now + 1.14, 0.7);
+      scheduleSiegeImpact(graph, now + 2.42, 0.72);
+      scheduleTimberWork(graph, now + 3.18, 0.62);
+      scheduleSiegeImpact(graph, now + 4.36, 0.64);
+      scheduleTimberWork(graph, now + 5.12, 0.54);
+      scheduleSiegeImpact(graph, now + 6.38, 0.58);
+      scheduleSiegeImpact(graph, now + 7.92, 0.46);
+      return;
+    case "siege-parley":
+      // A restrained pause in the pressure: footsteps and low cloth-and-wood
+      // movement signal envoys arriving without turning negotiation into combat.
+      scheduleSoftFootsteps(graph, now + 0.16, 8, 0.6, 0.014, "effect");
+      scheduleNoise(graph, {
+        at: now + 0.36,
+        duration: 4.9,
+        level: 0.015,
+        lowpass: 520,
+        highpass: 80,
+      });
+      return;
+    case "siege-aftermath":
+      scheduleSoftFootsteps(graph, now + 0.25, 12, 0.62, 0.015, "effect");
+      scheduleTravelCreak(graph, now + 1.1, 0.78);
+      scheduleTravelCreak(graph, now + 4.4, 0.62);
+      scheduleNoise(graph, {
+        at: now + 0.4,
+        duration: 8.1,
+        level: 0.018,
+        lowpass: 560,
+        highpass: 82,
+      });
+      return;
     default:
       return;
   }
@@ -781,8 +1177,6 @@ export function useBattlefieldAudio(enabled: boolean): BattlefieldAudioControlle
   }, []);
 
   const unlock = useCallback(async () => {
-    if (!enabledRef.current) return false;
-
     let graph = graphRef.current;
     if (!graph || graph.context.state === "closed") {
       graph = createAudioGraph();

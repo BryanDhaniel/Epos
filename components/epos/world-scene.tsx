@@ -294,6 +294,15 @@ function sceneAgentAnchor(
   // Cao Cao is deliberately staged on the raised flagship deck in Red Cliffs.
   if (sceneTheme === "red-cliffs" && agent.id === "cao-cao") return base;
 
+  // Jerusalem needs a deliberate inside/outside split at the northern wall.
+  // Siege crews remain on the exterior approach while the defenders stage on
+  // the city side, rather than sharing a point or walking through the wall.
+  if (sceneTheme === "jerusalem" && location.id === "northern-wall") {
+    return agent.factionId === "wei"
+      ? [base[0] + 0.08, base[1], base[2] + 1.05]
+      : [base[0] + 0.05, base[1], base[2] - 1.28];
+  }
+
   const sceneOffsets: Partial<Record<WorldSceneTheme, Record<string, Vector3Tuple>>> = {
     "red-cliffs": {
       xiakou: [0.1, 0, -1.72],
@@ -331,6 +340,20 @@ function sceneAgentAnchor(
       "aid-post": [1.55, 0, 0.25],
       "kampung-refuge": [0, 0, 3],
       "south-evacuation-road": [0.46, 0, 0.38],
+    },
+    jerusalem: {
+      "siege-camp": [0.15, 0, 1.72],
+      "western-approach": [0.1, 0, 0.58],
+      // These are clear staging spaces beside the models, not their solid
+      // footprints. Keeping agents on the street avoids visual clipping.
+      "jaffa-gate": [1.5, 0, 0.65],
+      "gate-court": [0.1, 0, 0.95],
+      "citadel-quarter": [1.92, 0, 0.65],
+      "cistern-court": [0.92, 0, -0.5],
+      "community-refuge": [0.78, 0, 1.5],
+      "northern-siege-works": [0.22, 0, 0.95],
+      "parley-ground": [0.1, 0, -0.5],
+      "departure-road": [0.52, 0, 0.35],
     },
   };
   const offset = sceneOffsets[sceneTheme]?.[location.id];
@@ -516,6 +539,54 @@ function sceneObstacles(sceneTheme: WorldSceneTheme, locations: readonly Scenari
       { id: "plancenoit", position: [7.2, 0, -4.55], radius: 1.36 },
       { id: "french-command-tent", position: [-8.2, 0, -1.7], radius: 1.12 },
       { id: "allied-ridge-tents", position: [2.45, 0, 4.7], radius: 1.48 },
+    ];
+  }
+
+  if (sceneTheme === "jerusalem") {
+    const siegeCamp = sceneLocationPosition(locations, ["siege-camp"], [-8, 0, -1]);
+    const citadel = sceneLocationPosition(locations, ["citadel-quarter"], [-2.7, 0, -2]);
+    const cistern = sceneLocationPosition(locations, ["cistern-court"], [0.8, 0, 1.05]);
+    const refuge = sceneLocationPosition(locations, ["community-refuge"], [2.3, 0, -1.55]);
+
+    return [
+      { id: "jerusalem-citadel", position: citadel, radius: 1.46 },
+      { id: "jerusalem-cistern", position: cistern, radius: 0.42 },
+      { id: "jerusalem-refuge-west", position: offsetPosition(refuge, -0.8, 0, -0.52), radius: 0.72 },
+      { id: "jerusalem-refuge-east", position: offsetPosition(refuge, 0.78, 0, -0.38), radius: 0.68 },
+      { id: "jerusalem-refuge-north", position: offsetPosition(refuge, -0.08, 0, 0.82), radius: 0.72 },
+      { id: "jerusalem-market-house-west", position: [1.7, 0, 1.92], radius: 0.62 },
+      { id: "jerusalem-market-house-east", position: [2.92, 0, 1.78], radius: 0.58 },
+      { id: "siege-camp-tent-west", position: offsetPosition(siegeCamp, -1.35, 0, 0.36), radius: 0.88 },
+      { id: "siege-camp-tent-east", position: offsetPosition(siegeCamp, 1.28, 0, 0.66), radius: 0.82 },
+      { id: "siege-camp-tent-south", position: offsetPosition(siegeCamp, 0.3, 0, -1.16), radius: 0.78 },
+      // The circular footprints approximate the visible walls and towers.
+      // They deliberately leave the modeled Jaffa Gate opening available for
+      // travel, while blocking the stonework on either side of it.
+      { id: "jaffa-gate-north-pillar", position: [-4.25, 0, 0.36], radius: 0.46 },
+      { id: "jaffa-gate-south-pillar", position: [-4.25, 0, -1.36], radius: 0.46 },
+      { id: "jerusalem-tower-west-north", position: [-4.3, 0, 3.45], radius: 0.86 },
+      { id: "jerusalem-tower-east-north", position: [4.3, 0, 3.45], radius: 0.86 },
+      { id: "jerusalem-tower-east-south", position: [4.3, 0, -3.3], radius: 0.86 },
+      { id: "jerusalem-tower-west-south", position: [-4.3, 0, -3.3], radius: 0.86 },
+      { id: "jerusalem-tower-north-center", position: [0.1, 0, 3.45], radius: 0.76 },
+      { id: "wall-west-north", position: [-4.45, 0, 2.2], radius: 0.7 },
+      { id: "wall-west-center", position: [-4.45, 0, 0.95], radius: 0.7 },
+      { id: "wall-west-south", position: [-4.45, 0, -2.18], radius: 0.7 },
+      { id: "wall-north-west", position: [-2.8, 0, 3.45], radius: 0.7 },
+      { id: "wall-north-west-center", position: [-1.4, 0, 3.45], radius: 0.7 },
+      { id: "wall-north-center", position: [0, 0, 3.45], radius: 0.7 },
+      { id: "wall-north-east", position: [2.85, 0, 3.45], radius: 0.7 },
+      // The gap between the center and east footprints is the active northern
+      // siege sector: both sides stage on opposite sides of the wall there.
+      { id: "wall-east-north", position: [4.35, 0, 1.9], radius: 0.68 },
+      { id: "wall-east-center", position: [4.35, 0, 0.48], radius: 0.68 },
+      { id: "wall-east-lower-center", position: [4.35, 0, -0.82], radius: 0.68 },
+      { id: "wall-east-south", position: [4.35, 0, -1.9], radius: 0.68 },
+      { id: "wall-south-west", position: [-2.4, 0, -3.3], radius: 0.68 },
+      { id: "wall-south-west-center", position: [-1.02, 0, -3.3], radius: 0.68 },
+      { id: "wall-south-center", position: [0.45, 0, -3.3], radius: 0.68 },
+      { id: "wall-south-east-center", position: [1.82, 0, -3.3], radius: 0.68 },
+      { id: "wall-south-east", position: [3.12, 0, -3.3], radius: 0.68 },
     ];
   }
 
@@ -2254,10 +2325,12 @@ function AidRouteMarkers({
   from,
   to,
   count = 7,
+  color = "#e9c86b",
 }: {
   from: Vector3Tuple;
   to: Vector3Tuple;
   count?: number;
+  color?: string;
 }) {
   const markers = useRef<THREE.Group>(null);
 
@@ -2285,7 +2358,7 @@ function AidRouteMarkers({
             rotation={[-Math.PI / 2, 0, 0]}
           >
             <ringGeometry args={[0.1, 0.19, 16]} />
-            <meshBasicMaterial color="#e9c86b" transparent opacity={0.72} depthWrite={false} />
+            <meshBasicMaterial color={color} transparent opacity={0.72} depthWrite={false} />
           </mesh>
         );
       })}
@@ -2551,6 +2624,665 @@ function SurabayaSceneSequence({
   return null;
 }
 
+function StoneRoad({
+  position,
+  length,
+  width = 1.4,
+  rotation = 0,
+}: {
+  position: Vector3Tuple;
+  length: number;
+  width?: number;
+  rotation?: number;
+}) {
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.108, 0]}>
+        <planeGeometry args={[width, length]} />
+        <meshStandardMaterial color="#ae966e" roughness={1} />
+      </mesh>
+      {Array.from({ length: Math.max(3, Math.floor(length / 1.65)) }, (_, index) => (
+        <mesh
+          key={index}
+          receiveShadow
+          position={[((index % 3) - 1) * width * 0.18, -0.1, -length / 2 + 0.8 + index * 1.48]}
+          rotation={[-Math.PI / 2, 0, index * 0.63]}
+        >
+          <planeGeometry args={[0.24 + (index % 2) * 0.08, 0.16]} />
+          <meshStandardMaterial color={index % 2 ? "#c0aa82" : "#9f8966"} roughness={1} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function OliveTree({ position, scale = 1 }: { position: Vector3Tuple; scale?: number }) {
+  return (
+    <group position={position} scale={scale}>
+      <mesh castShadow position={[0, 0.78, 0]} rotation={[0.04, 0, -0.06]}>
+        <cylinderGeometry args={[0.11, 0.18, 1.56, 6]} />
+        <meshStandardMaterial color="#6d5a3c" roughness={0.96} />
+      </mesh>
+      {[
+        [0, 1.75, 0, 0.72],
+        [-0.38, 1.57, 0.08, 0.56],
+        [0.35, 1.62, -0.16, 0.58],
+      ].map(([x, y, z, canopy], index) => (
+        <mesh key={index} castShadow position={[x, y, z]} scale={[1.18, 0.72, 1]}>
+          <dodecahedronGeometry args={[canopy, 0]} />
+          <meshStandardMaterial color={index === 1 ? "#65704a" : "#56653f"} roughness={0.98} flatShading />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function JerusalemWallSegment({
+  position,
+  length,
+  rotation = 0,
+}: {
+  position: Vector3Tuple;
+  length: number;
+  rotation?: number;
+}) {
+  const crenellationCount = Math.max(3, Math.floor(length / 0.72));
+
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <mesh castShadow receiveShadow position={[0, 0.18, 0]}>
+        <boxGeometry args={[length + 0.18, 0.36, 0.58]} />
+        <meshStandardMaterial color="#9d8968" roughness={1} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[0, 1.05, 0]}>
+        <boxGeometry args={[length, 1.48, 0.48]} />
+        <meshStandardMaterial color="#b7a17d" roughness={0.98} />
+      </mesh>
+      {Array.from({ length: crenellationCount }, (_, index) => {
+        const x = -length / 2 + 0.34 + (index * (length - 0.68)) / Math.max(1, crenellationCount - 1);
+        return (
+          <mesh key={index} castShadow position={[x, 1.88, 0]}>
+            <boxGeometry args={[0.32, 0.32, 0.6]} />
+            <meshStandardMaterial color={index % 2 ? "#ad9874" : "#bba684"} roughness={1} />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+function JerusalemTower({ position, scale = 1 }: { position: Vector3Tuple; scale?: number }) {
+  return (
+    <group position={position} scale={scale}>
+      <mesh castShadow receiveShadow position={[0, 0.16, 0]}>
+        <boxGeometry args={[1.28, 0.32, 1.28]} />
+        <meshStandardMaterial color="#907c5e" roughness={1} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[0, 1.28, 0]}>
+        <boxGeometry args={[1.08, 1.92, 1.08]} />
+        <meshStandardMaterial color="#b29a74" roughness={0.98} />
+      </mesh>
+      {[
+        [-0.37, 2.32, -0.37], [0.37, 2.32, -0.37], [-0.37, 2.32, 0.37], [0.37, 2.32, 0.37],
+      ].map(([x, y, z]) => (
+        <mesh key={`${x}-${z}`} castShadow position={[x, y, z]}>
+          <boxGeometry args={[0.3, 0.35, 0.3]} />
+          <meshStandardMaterial color="#a68f6c" roughness={1} />
+        </mesh>
+      ))}
+      <mesh castShadow position={[0, 1.2, 0.555]}>
+        <boxGeometry args={[0.34, 0.64, 0.035]} />
+        <meshStandardMaterial color="#615040" roughness={0.98} />
+      </mesh>
+    </group>
+  );
+}
+
+function JerusalemGate({ position }: { position: Vector3Tuple }) {
+  return (
+    <group position={position} rotation={[0, Math.PI / 2, 0]}>
+      {[-0.86, 0.86].map((x) => (
+        <mesh key={x} castShadow receiveShadow position={[x, 1.05, 0]}>
+          <boxGeometry args={[0.48, 2.1, 0.78]} />
+          <meshStandardMaterial color="#b39b75" roughness={0.98} />
+        </mesh>
+      ))}
+      <mesh castShadow receiveShadow position={[0, 1.94, 0]}>
+        <boxGeometry args={[2.16, 0.38, 0.78]} />
+        <meshStandardMaterial color="#a58f6d" roughness={1} />
+      </mesh>
+      <mesh castShadow position={[0, 0.5, 0.405]}>
+        <boxGeometry args={[1.2, 0.9, 0.05]} />
+        <meshStandardMaterial color="#5d4938" roughness={0.98} />
+      </mesh>
+    </group>
+  );
+}
+
+function JerusalemCitadel({ position }: { position: Vector3Tuple }) {
+  return (
+    <group position={position}>
+      <mesh castShadow receiveShadow position={[0, 0.16, 0]}>
+        <boxGeometry args={[2.65, 0.32, 2.15]} />
+        <meshStandardMaterial color="#8e7a5c" roughness={1} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[0, 1.16, 0]}>
+        <boxGeometry args={[2.35, 1.72, 1.85]} />
+        <meshStandardMaterial color="#aa9370" roughness={0.98} />
+      </mesh>
+      {[
+        [-0.92, 2.15, -0.66], [0.92, 2.15, -0.66], [-0.92, 2.15, 0.66], [0.92, 2.15, 0.66],
+      ].map(([x, y, z]) => (
+        <mesh key={`${x}-${z}`} castShadow position={[x, y, z]}>
+          <boxGeometry args={[0.38, 0.34, 0.38]} />
+          <meshStandardMaterial color="#9f8865" roughness={1} />
+        </mesh>
+      ))}
+      <mesh castShadow position={[0, 0.76, 0.94]}>
+        <boxGeometry args={[0.54, 0.88, 0.04]} />
+        <meshStandardMaterial color="#594838" roughness={0.98} />
+      </mesh>
+    </group>
+  );
+}
+
+function JerusalemStoneHouse({
+  position,
+  scale = 1,
+  wall = "#bea783",
+}: {
+  position: Vector3Tuple;
+  scale?: number;
+  wall?: string;
+}) {
+  return (
+    <group position={position} scale={scale}>
+      <mesh castShadow receiveShadow position={[0, 0.56, 0]}>
+        <boxGeometry args={[1.45, 1.04, 1.2]} />
+        <meshStandardMaterial color={wall} roughness={0.98} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[0, 1.13, 0]}>
+        <boxGeometry args={[1.62, 0.16, 1.38]} />
+        <meshStandardMaterial color="#8d795d" roughness={1} />
+      </mesh>
+      <mesh castShadow position={[0, 0.42, 0.614]}>
+        <boxGeometry args={[0.3, 0.7, 0.035]} />
+        <meshStandardMaterial color="#634d39" roughness={0.98} />
+      </mesh>
+      <mesh position={[-0.43, 0.76, 0.618]}>
+        <boxGeometry args={[0.26, 0.23, 0.025]} />
+        <meshStandardMaterial color="#504d45" roughness={0.9} />
+      </mesh>
+    </group>
+  );
+}
+
+function CourtyardCistern({ position }: { position: Vector3Tuple }) {
+  return (
+    <group position={position}>
+      <mesh receiveShadow position={[0, 0.05, 0]}>
+        <cylinderGeometry args={[0.72, 0.82, 0.1, 12]} />
+        <meshStandardMaterial color="#a18a69" roughness={1} />
+      </mesh>
+      <mesh castShadow position={[0, 0.26, 0]}>
+        <cylinderGeometry args={[0.53, 0.6, 0.34, 12, 1, true]} />
+        <meshStandardMaterial color="#b19a75" roughness={1} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[0, 0.29, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.45, 16]} />
+        <meshStandardMaterial color="#537d82" roughness={0.45} metalness={0.12} />
+      </mesh>
+      {[-0.82, 0.84].map((x) => (
+        <mesh key={x} castShadow position={[x, 0.19, 0.32]} scale={[0.76, 1.12, 0.76]}>
+          <sphereGeometry args={[0.16, 7, 5]} />
+          <meshStandardMaterial color="#8d6847" roughness={0.95} flatShading />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function TimberStack({ position, scale = 1 }: { position: Vector3Tuple; scale?: number }) {
+  return (
+    <group position={position} scale={scale}>
+      {[-0.22, 0.02, 0.26].map((y, row) => (
+        [-0.44, 0, 0.44].map((x, index) => (
+          <mesh key={`${row}-${index}`} castShadow position={[x, y + 0.18, row % 2 ? 0.08 : -0.08]} rotation={[0, row % 2 ? Math.PI / 2 : 0, 0]}>
+            <cylinderGeometry args={[0.07, 0.07, 1.28, 6]} />
+            <meshStandardMaterial color={row % 2 ? "#79563a" : "#6c4c35"} roughness={0.97} />
+          </mesh>
+        ))
+      ))}
+    </group>
+  );
+}
+
+function JerusalemSiegeCamp({ position }: { position: Vector3Tuple }) {
+  return (
+    <group position={position}>
+      <Tent position={[-1.3, 0.02, 0.38]} color="#c9b384" rotation={0.24} scale={0.86} />
+      <Tent position={[1.26, 0.02, 0.68]} color="#bca677" rotation={-0.18} scale={0.8} />
+      <Tent position={[0.28, 0.02, -1.18]} color="#d2bd91" rotation={0.42} scale={0.73} />
+      <Campfire position={[-0.22, 0.08, 0.16]} />
+      <TimberStack position={[1.74, 0.03, -0.88]} scale={0.78} />
+      {[-0.58, -0.16, 0.27].map((x) => (
+        <mesh key={x} castShadow position={[x, 0.18, 1.2]} scale={[0.78, 1.18, 0.78]}>
+          <sphereGeometry args={[0.15, 7, 5]} />
+          <meshStandardMaterial color="#8f6848" roughness={0.95} flatShading />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function SiegeTower({
+  position,
+  rotation = 0,
+  scale = 1,
+  construction = 1,
+}: {
+  position: Vector3Tuple;
+  rotation?: number;
+  scale?: number;
+  construction?: number;
+}) {
+  const hasFrame = construction > 0.18;
+  const hasPlatform = construction > 0.52;
+  const hasRoof = construction > 0.8;
+
+  return (
+    <group position={position} rotation={[0, rotation, 0]} scale={scale}>
+      <mesh castShadow receiveShadow position={[0, 0.16, 0]} visible={hasFrame}>
+        <boxGeometry args={[1.46, 0.3, 1.64]} />
+        <meshStandardMaterial color="#694c35" roughness={0.96} />
+      </mesh>
+      {[-0.58, 0.58].flatMap((x) => [-0.58, 0.58].map((z) => [x, z] as const)).map(([x, z]) => (
+        <mesh key={`${x}-${z}`} castShadow position={[x, 1.54, z]} visible={hasFrame}>
+          <boxGeometry args={[0.12, 2.9, 0.12]} />
+          <meshStandardMaterial color="#705039" roughness={0.97} />
+        </mesh>
+      ))}
+      {hasFrame && [0.74, 1.46, 2.18].map((y) => (
+        <mesh key={y} castShadow position={[0, y, 0]}>
+          <boxGeometry args={[1.25, 0.1, 1.36]} />
+          <meshStandardMaterial color="#8b6543" roughness={0.96} />
+        </mesh>
+      ))}
+      {hasPlatform && (
+        <>
+          <mesh castShadow position={[0, 2.84, 0]}>
+            <boxGeometry args={[1.38, 0.17, 1.52]} />
+            <meshStandardMaterial color="#8a6748" roughness={0.94} />
+          </mesh>
+          <mesh castShadow position={[0, 1.42, -0.72]} rotation={[0.68, 0, 0]}>
+            <boxGeometry args={[0.72, 2.42, 0.08]} />
+            <meshStandardMaterial color="#8b6848" roughness={0.97} />
+          </mesh>
+        </>
+      )}
+      {hasRoof && (
+        <mesh castShadow position={[0, 3.15, 0]} scale={[1.1, 0.54, 1.1]}>
+          <coneGeometry args={[0.95, 0.76, 4]} />
+          <meshStandardMaterial color="#796044" roughness={0.96} flatShading />
+        </mesh>
+      )}
+      {[-0.62, 0.62].flatMap((x) => [-0.62, 0.62].map((z) => [x, z] as const)).map(([x, z]) => (
+        <mesh key={`wheel-${x}-${z}`} castShadow position={[x, 0.22, z]} rotation={[0, Math.PI / 2, 0]} visible={hasFrame}>
+          <torusGeometry args={[0.22, 0.055, 5, 10]} />
+          <meshStandardMaterial color="#4e3b2e" roughness={0.98} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function RollingSiegeTower({
+  from,
+  to,
+  delay = 0,
+}: {
+  from: Vector3Tuple;
+  to: Vector3Tuple;
+  delay?: number;
+}) {
+  const tower = useRef<THREE.Group>(null);
+  const startedAt = useRef<number | null>(null);
+
+  useFrame(({ clock }) => {
+    if (startedAt.current === null) startedAt.current = clock.elapsedTime;
+    const elapsed = clock.elapsedTime - startedAt.current - delay;
+    if (!tower.current) return;
+
+    tower.current.visible = elapsed >= 0;
+    if (elapsed < 0) return;
+    const progress = smoothstep(THREE.MathUtils.clamp(elapsed / 6.4, 0, 1));
+    tower.current.position.set(
+      THREE.MathUtils.lerp(from[0], to[0], progress),
+      THREE.MathUtils.lerp(from[1], to[1], progress) + 0.035 + Math.sin(elapsed * 2.8) * 0.018,
+      THREE.MathUtils.lerp(from[2], to[2], progress),
+    );
+    tower.current.rotation.y = routeRotation(from, to);
+  });
+
+  return (
+    <group ref={tower}>
+      <SiegeTower position={[0, 0, 0]} construction={1} scale={0.86} />
+    </group>
+  );
+}
+
+function FiniteSiegeDustBurst({
+  position,
+  delay = 0,
+  scale = 1,
+}: {
+  position: Vector3Tuple;
+  delay?: number;
+  scale?: number;
+}) {
+  const group = useRef<THREE.Group>(null);
+  const dust = useRef<THREE.Group>(null);
+  const startedAt = useRef<number | null>(null);
+
+  useFrame(({ clock }) => {
+    if (startedAt.current === null) startedAt.current = clock.elapsedTime;
+    const elapsed = clock.elapsedTime - startedAt.current - delay;
+    const visible = elapsed >= 0 && elapsed < 4.8;
+    if (group.current) group.current.visible = visible;
+    if (!visible || !dust.current) return;
+
+    const rise = THREE.MathUtils.clamp(elapsed / 4.5, 0, 1);
+    dust.current.children.forEach((particle, index) => {
+      const spread = (0.1 + rise * 0.68) * scale;
+      particle.position.set(
+        Math.sin(index * 1.8 + elapsed * 0.45) * spread,
+        0.22 + rise * (1.05 + index * 0.08) * scale,
+        Math.cos(index * 1.43 + elapsed * 0.38) * spread,
+      );
+      particle.scale.setScalar((0.18 + rise * 0.84) * scale);
+      (particle as THREE.Mesh).visible = rise < 0.96;
+    });
+  });
+
+  return (
+    <group ref={group} position={position}>
+      <group ref={dust}>
+        {[0, 1, 2, 3].map((index) => (
+          <mesh key={index} castShadow>
+            <dodecahedronGeometry args={[0.24, 0]} />
+            <meshStandardMaterial color="#b79d76" transparent opacity={0.46} roughness={1} flatShading />
+          </mesh>
+        ))}
+      </group>
+    </group>
+  );
+}
+
+function WaterCarrierRoute({ from, to }: { from: Vector3Tuple; to: Vector3Tuple }) {
+  const carrier = useRef<THREE.Group>(null);
+
+  useFrame(({ clock }) => {
+    if (!carrier.current) return;
+    const cycle = (clock.elapsedTime * 0.075) % 1;
+    const outward = cycle <= 0.5;
+    const progress = outward ? cycle * 2 : (1 - cycle) * 2;
+    const start = outward ? from : to;
+    const end = outward ? to : from;
+    carrier.current.position.set(
+      THREE.MathUtils.lerp(start[0], end[0], progress),
+      0.11 + Math.sin(clock.elapsedTime * 4.3) * 0.018,
+      THREE.MathUtils.lerp(start[2], end[2], progress),
+    );
+    carrier.current.rotation.y = routeRotation(start, end);
+  });
+
+  return (
+    <group ref={carrier} scale={0.78}>
+      <mesh castShadow receiveShadow position={[0, 0.26, 0]}>
+        <boxGeometry args={[0.58, 0.34, 0.76]} />
+        <meshStandardMaterial color="#76543c" roughness={0.96} />
+      </mesh>
+      {[-0.32, 0.32].flatMap((x) => [-0.24, 0.24].map((z) => [x, z] as const)).map(([x, z]) => (
+        <mesh key={`${x}-${z}`} castShadow position={[x, 0.16, z]} rotation={[0, Math.PI / 2, 0]}>
+          <torusGeometry args={[0.15, 0.04, 5, 9]} />
+          <meshStandardMaterial color="#4d3b2e" roughness={0.98} />
+        </mesh>
+      ))}
+      {[-0.22, 0.22].map((x) => (
+        <mesh key={x} castShadow position={[x, 0.52, 0.03]} scale={[0.76, 1.16, 0.76]}>
+          <sphereGeometry args={[0.16, 7, 5]} />
+          <meshStandardMaterial color="#9c704e" roughness={0.95} flatShading />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function CisternStrainMarker({ position }: { position: Vector3Tuple }) {
+  const rings = useRef<THREE.Group>(null);
+
+  useFrame(({ clock }) => {
+    if (!rings.current) return;
+    rings.current.children.forEach((ring, index) => {
+      const phase = (clock.elapsedTime * 0.48 + index * 0.34) % 1;
+      ring.scale.setScalar(0.72 + phase * 0.65);
+      (ring as THREE.Mesh).position.y = 0.08 + phase * 0.18;
+      (ring as THREE.Mesh).visible = phase < 0.88;
+    });
+  });
+
+  return (
+    <group ref={rings} position={position}>
+      {[0, 1, 2].map((index) => (
+        <mesh key={index} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[0.26, 0.35, 16]} />
+          <meshBasicMaterial color="#74b7c1" transparent opacity={0.58} depthWrite={false} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function ParleyMarker({ position }: { position: Vector3Tuple }) {
+  const flags = useRef<THREE.Group>(null);
+
+  useFrame(({ clock }) => {
+    if (!flags.current) return;
+    flags.current.rotation.y = Math.sin(clock.elapsedTime * 0.78) * 0.06;
+  });
+
+  return (
+    <group ref={flags} position={position}>
+      {[-0.42, 0.42].map((x, index) => (
+        <group key={x} position={[x, 0, 0]}>
+          <mesh castShadow position={[0, 0.72, 0]}>
+            <cylinderGeometry args={[0.018, 0.018, 1.44, 5]} />
+            <meshStandardMaterial color="#705540" roughness={0.96} />
+          </mesh>
+          <mesh castShadow position={[0.17, 1.16, 0]}>
+            <planeGeometry args={[0.34, 0.24]} />
+            <meshStandardMaterial color={index ? "#9b7653" : "#d5d0b4"} side={THREE.DoubleSide} roughness={0.92} />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  );
+}
+
+function JerusalemScenery({
+  weather,
+  locations,
+}: {
+  weather: WeatherState;
+  locations: readonly ScenarioLocation[];
+}) {
+  const hazy = weather.condition === "overcast" || weather.condition === "fog";
+  const skyColor = hazy ? "#c9bda5" : "#d6c7aa";
+  const sunPosition: Vector3Tuple = hazy ? [-9, 8, 5] : [-11, 12, 7];
+  const camp = sceneLocationPosition(locations, ["siege-camp"], [-8, 0, -1]);
+  const gate = sceneLocationPosition(locations, ["jaffa-gate"], [-4.8, 0, -0.5]);
+  const citadel = sceneLocationPosition(locations, ["citadel-quarter"], [-2.7, 0, -2]);
+  const cistern = sceneLocationPosition(locations, ["cistern-court"], [0.8, 0, 1.05]);
+  const refuge = sceneLocationPosition(locations, ["community-refuge"], [2.3, 0, -1.55]);
+  const workyard = sceneLocationPosition(locations, ["northern-siege-works"], [1.1, 0, 5.7]);
+  const northWall = sceneLocationPosition(locations, ["northern-wall"], [1.1, 0, 3.5]);
+  const departure = sceneLocationPosition(locations, ["departure-road"], [-9.7, 0, -5.6]);
+  const gateWall = offsetPosition(gate, 0.55, 0, 0);
+
+  return (
+    <>
+      <Sky distance={450000} sunPosition={sunPosition} turbidity={hazy ? 13 : 8} rayleigh={hazy ? 0.46 : 0.8} mieCoefficient={0.01} mieDirectionalG={0.77} />
+      <fog attach="fog" args={[skyColor, 20, 49]} />
+      <hemisphereLight args={["#eadfc9", "#695b42", 1.9]} />
+      <directionalLight castShadow position={sunPosition} intensity={hazy ? 1.55 : 2.18} color="#ffe7b7" shadow-mapSize-width={1536} shadow-mapSize-height={1536} shadow-bias={-0.00016} />
+      <directionalLight position={[9, 6, -8]} intensity={0.28} color="#cbb99a" />
+
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.15, 0]}>
+        <planeGeometry args={[47, 33]} />
+        <meshStandardMaterial color={hazy ? "#a89773" : "#b39c73"} roughness={1} />
+      </mesh>
+      <TerrainPatch position={[-11.7, -0.13, 5.7]} scale={[6.2, 3.8, 1]} color="#9a8c61" rotation={0.12} />
+      <TerrainPatch position={[10.4, -0.13, 5.2]} scale={[6.9, 4.1, 1]} color="#a59168" rotation={-0.2} />
+      <TerrainPatch position={[10.7, -0.13, -7.3]} scale={[6.4, 3.7, 1]} color="#97875f" rotation={0.18} />
+      <TerrainPatch position={[-11.1, -0.13, -7.2]} scale={[5.9, 3.6, 1]} color="#9f9068" rotation={-0.16} />
+
+      <StoneRoad position={routeMidpoint(camp, gate)} length={routeLength(camp, gate) + 0.7} width={1.55} rotation={routeRotation(camp, gate)} />
+      <StoneRoad position={routeMidpoint(gate, departure)} length={routeLength(gate, departure) + 0.4} width={1.3} rotation={routeRotation(gate, departure)} />
+      <StoneRoad position={routeMidpoint(cistern, refuge)} length={routeLength(cistern, refuge) + 0.2} width={1.05} rotation={routeRotation(cistern, refuge)} />
+      <StoneRoad position={routeMidpoint(workyard, northWall)} length={routeLength(workyard, northWall) + 0.45} width={1.28} rotation={routeRotation(workyard, northWall)} />
+
+      <JerusalemWallSegment position={[0, 0, 3.45]} length={8.55} />
+      <JerusalemWallSegment position={[0, 0, -3.3]} length={8.55} />
+      <JerusalemWallSegment position={[4.3, 0, 0.08]} length={6.8} rotation={Math.PI / 2} />
+      <JerusalemWallSegment position={[-4.3, 0, 1.72]} length={3.02} rotation={Math.PI / 2} />
+      <JerusalemWallSegment position={[-4.3, 0, -2.2]} length={2.18} rotation={Math.PI / 2} />
+      <JerusalemGate position={gateWall} />
+      {([
+        [-4.3, 0, 3.45], [4.3, 0, 3.45], [4.3, 0, -3.3], [-4.3, 0, -3.3], [0.1, 0, 3.45],
+      ] as Vector3Tuple[]).map((position, index) => (
+        <JerusalemTower key={`jerusalem-tower-${index}`} position={position} scale={index === 4 ? 0.88 : 1} />
+      ))}
+
+      <JerusalemCitadel position={citadel} />
+      <CourtyardCistern position={cistern} />
+      <JerusalemStoneHouse position={offsetPosition(refuge, -0.82, 0, -0.5)} wall="#bca47f" />
+      <JerusalemStoneHouse position={offsetPosition(refuge, 0.78, 0, -0.38)} scale={0.92} wall="#c2ad89" />
+      <JerusalemStoneHouse position={offsetPosition(refuge, -0.08, 0, 0.84)} scale={0.9} wall="#ac9471" />
+      <JerusalemStoneHouse position={[1.7, 0, 1.92]} scale={0.78} wall="#c4ac86" />
+      <JerusalemStoneHouse position={[2.92, 0, 1.78]} scale={0.72} wall="#b29770" />
+
+      <JerusalemSiegeCamp position={camp} />
+      <TimberStack position={workyard} scale={1.15} />
+      <Tent position={offsetPosition(workyard, -1.34, 0.02, 0.55)} color="#bba678" rotation={-0.24} scale={0.68} />
+
+      {([
+        [-14.6, 0, 6.5], [-12.2, 0, 7.9], [-10.1, 0, 5.9], [-8.8, 0, 8.6], [-6.2, 0, 7.7],
+        [6.7, 0, 8.1], [9.4, 0, 7.2], [12.4, 0, 8.5], [14.7, 0, 6.3], [-15.1, 0, -6.5],
+        [-12.8, 0, -8.6], [11.5, 0, -8.7], [14.5, 0, -6.7],
+      ] as Vector3Tuple[]).map((position, index) => (
+        <OliveTree key={`jerusalem-olive-${index}`} position={position} scale={0.8 + (index % 3) * 0.12} />
+      ))}
+      {([
+        [-15.4, 2.35, -10.1], [-9.4, 2.7, -11.5], [5.1, 2.45, -11.1], [13.1, 2.55, -9.8],
+        [-14.7, 2.45, 11.1], [-5.8, 2.05, 12.1], [7.4, 2.42, 11.7], [15.2, 2.3, 9.6],
+      ] as Vector3Tuple[]).map((position, index) => (
+        <Mountain key={`jerusalem-horizon-${index}`} position={position} scale={3.6 + (index % 3) * 0.58} color={index % 2 ? "#907f5d" : "#9b8b67"} />
+      ))}
+      <ContactShadows position={[0, -0.115, 0]} opacity={0.32} scale={45} blur={2.7} far={10} color="#665945" />
+    </>
+  );
+}
+
+function JerusalemSceneSequence({
+  action,
+  eventId,
+  locations,
+}: {
+  action: Exclude<WorldActionCue, "fire-attack">;
+  eventId?: string;
+  locations: readonly ScenarioLocation[];
+}) {
+  const camp = sceneLocationPosition(locations, ["siege-camp"], [-8, 0, -1]);
+  const approach = sceneLocationPosition(locations, ["western-approach"], [-6.4, 0, -0.5]);
+  const workyard = sceneLocationPosition(locations, ["northern-siege-works"], [1.1, 0, 5.7]);
+  const northWall = sceneLocationPosition(locations, ["northern-wall"], [1.1, 0, 3.5]);
+  const cistern = sceneLocationPosition(locations, ["cistern-court"], [0.8, 0, 1.05]);
+  const refuge = sceneLocationPosition(locations, ["community-refuge"], [2.3, 0, -1.55]);
+  const parley = sceneLocationPosition(locations, ["parley-ground"], [-6.1, 0, -0.5]);
+  const gate = sceneLocationPosition(locations, ["jaffa-gate"], [-4.8, 0, -0.5]);
+  const departure = sceneLocationPosition(locations, ["departure-road"], [-9.7, 0, -5.6]);
+
+  if (action === "siege-arrival") {
+    if (eventId === "western-approach-tested") {
+      return (
+        <group>
+          <AidRouteMarkers from={approach} to={gate} count={4} color="#d3b86b" />
+          <FiniteSiegeDustBurst position={offsetPosition(gate, 0.06, 0.06, 0.64)} delay={0.78} scale={0.44} />
+          <FiniteSiegeDustBurst position={offsetPosition(gate, -0.18, 0.06, -0.62)} delay={3.36} scale={0.36} />
+        </group>
+      );
+    }
+
+    return <AidRouteMarkers from={camp} to={approach} count={5} color="#d3b86b" />;
+  }
+  if (action === "water-scarcity") {
+    return (
+      <group>
+        <CisternStrainMarker position={cistern} />
+        <WaterCarrierRoute from={cistern} to={refuge} />
+        <AidRouteMarkers from={cistern} to={refuge} count={4} color="#75b7c0" />
+      </group>
+    );
+  }
+  if (action === "siege-engine-build") {
+    return (
+      <group>
+        <SiegeTower position={offsetPosition(workyard, 0, 0, -0.38)} rotation={Math.PI} scale={0.9} construction={1} />
+        <TimberStack position={offsetPosition(workyard, 1.32, 0, 0.45)} scale={0.74} />
+        <AidRouteMarkers from={camp} to={workyard} count={5} color="#c9a978" />
+      </group>
+    );
+  }
+  if (action === "siege-assault") {
+    const towerEnd = offsetPosition(northWall, 0, 0, 0.98);
+    return (
+      <group>
+        <RollingSiegeTower from={workyard} to={towerEnd} delay={0.22} />
+        <FiniteSiegeDustBurst position={offsetPosition(northWall, -0.62, 0.06, 0.34)} delay={1.05} scale={0.76} />
+        <FiniteSiegeDustBurst position={offsetPosition(northWall, 0.78, 0.06, 0.32)} delay={3.1} scale={0.64} />
+        <FiniteSiegeDustBurst position={offsetPosition(northWall, 0.08, 0.06, 0.48)} delay={5.24} scale={0.56} />
+        <AidRouteMarkers from={cistern} to={gate} count={4} color="#75b7c0" />
+      </group>
+    );
+  }
+  if (action === "siege-parley") {
+    return (
+      <group>
+        <ParleyMarker position={parley} />
+        <AidRouteMarkers from={gate} to={parley} count={4} color="#d9c477" />
+      </group>
+    );
+  }
+  if (action === "siege-aftermath") {
+    if (eventId === "jerusalem-surrenders-2-october") {
+      return (
+        <group>
+          <ParleyMarker position={offsetPosition(gate, 0.55, 0, 0)} />
+          <AidRouteMarkers from={parley} to={gate} count={4} color="#d9c477" />
+        </group>
+      );
+    }
+
+    return (
+      <group>
+        <AidRouteMarkers from={gate} to={departure} count={6} color="#d9c477" />
+      </group>
+    );
+  }
+
+  return null;
+}
+
 function Scenery({ weather, fireAttackActive }: { weather: WeatherState; fireAttackActive: boolean }) {
   const skyColor = weather.condition === "clear" ? "#a9cedd" : "#aabfc6";
   const sunPosition: Vector3Tuple = weather.condition === "clear" ? [-12, 11, 6] : [-8, 7, 5];
@@ -2716,10 +3448,16 @@ function SceneContent({
     sceneTheme === "surabaya" && activeEvent?.action && activeEvent.action !== "fire-attack"
       ? activeEvent.action
       : undefined;
+  const jerusalemAction: Exclude<WorldActionCue, "fire-attack"> | undefined =
+    sceneTheme === "jerusalem" && activeEvent?.action && activeEvent.action !== "fire-attack"
+      ? activeEvent.action
+      : undefined;
 
   return (
     <>
-      {sceneTheme === "surabaya" ? (
+      {sceneTheme === "jerusalem" ? (
+        <JerusalemScenery weather={weather} locations={locations} />
+      ) : sceneTheme === "surabaya" ? (
         <SurabayaScenery weather={weather} locations={locations} />
       ) : sceneTheme === "waterloo" ? (
         <WaterlooScenery weather={weather} activeAction={waterlooAction} />
@@ -2738,6 +3476,14 @@ function SceneContent({
         <SurabayaSceneSequence
           key={activeEvent?.id ?? surabayaAction}
           action={surabayaAction}
+          locations={locations}
+        />
+      )}
+      {jerusalemAction && (
+        <JerusalemSceneSequence
+          key={activeEvent?.id ?? jerusalemAction}
+          action={jerusalemAction}
+          eventId={activeEvent?.id}
           locations={locations}
         />
       )}

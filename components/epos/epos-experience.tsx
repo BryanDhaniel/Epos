@@ -99,11 +99,14 @@ function resolveWhatIfPreset(
   if (/(wind|breeze|rain|mud|ground|weather|dry)/.test(normalized)) {
     return find((preset) => preset.type === "weather");
   }
+  if (/(water|cistern|thirst|drought)/.test(normalized)) {
+    return find((preset, text) => preset.type === "resource" || preset.type === "infrastructure" || /(water|cistern)/.test(text));
+  }
   if (/(supply|supplies|food|provisions|ammunition|ammo)/.test(normalized)) {
     return find((preset, text) => preset.type === "resource" || /(supply|food|ammo|ammunition)/.test(text));
   }
-  if (/(ceasefire|truce|ultimatum|negotia|renewed talks|talks)/.test(normalized)) {
-    return find((preset, text) => preset.type === "event" && /(ceasefire|truce|ultimatum|talk)/.test(text));
+  if (/(ceasefire|truce|ultimatum|negotia|renewed talks|talks|parley|ransom|surrender|passage)/.test(normalized)) {
+    return find((preset, text) => preset.type === "event" && /(ceasefire|truce|ultimatum|talk|parley|ransom|surrender|passage)/.test(text));
   }
   if (/(radio|broadcast|signal|message|communicat|rumou?r)/.test(normalized)) {
     return find((preset, text) => preset.type === "infrastructure" && /(radio|message|communication|signal)/.test(text));
@@ -114,7 +117,7 @@ function resolveWhatIfPreset(
   if (/(reinforcement|reinforce|arrive|arrival|prussian|blücher|blucher|troops)/.test(normalized)) {
     return find((preset, text) => preset.type === "reinforcement" || /(reinforce|arriv|prussian|blucher)/.test(text));
   }
-  if (/(hold|farm|fort|bridge|la haye)/.test(normalized)) {
+  if (/(hold|farm|fort|bridge|la haye|siege|wall|tower|engine|gate|breach)/.test(normalized)) {
     return find((preset) => preset.type === "event" || preset.type === "infrastructure");
   }
 
@@ -125,15 +128,28 @@ function getSceneAmbienceCue(
   sceneTheme: WorldSceneTheme | undefined,
   tick: number,
 ): BattlefieldAmbienceCue | undefined {
-  if (sceneTheme !== "surabaya") return undefined;
+  if (sceneTheme === "surabaya") {
+    if (tick <= 1) return "surabaya-harbour";
+    if (tick === 2 || tick === 5) return "surabaya-radio-room";
+    if (tick === 3 || tick === 4) return "surabaya-street-lull";
+    if (tick === 6) return "surabaya-urban-pressure";
+    if (tick === 7) return "surabaya-aid-route";
 
-  if (tick <= 1) return "surabaya-harbour";
-  if (tick === 2 || tick === 5) return "surabaya-radio-room";
-  if (tick === 3 || tick === 4) return "surabaya-street-lull";
-  if (tick === 6) return "surabaya-urban-pressure";
-  if (tick === 7) return "surabaya-aid-route";
+    return "surabaya-aftermath";
+  }
 
-  return "surabaya-aftermath";
+  if (sceneTheme === "jerusalem") {
+    if (tick <= 1) return "jerusalem-dry-morning";
+    if (tick === 2) return "jerusalem-city-strain";
+    if (tick === 3 || tick === 4) return "jerusalem-siege-camp";
+    if (tick === 5) return "jerusalem-assault-pressure";
+    if (tick === 6) return "jerusalem-parley";
+    if (tick === 7) return "jerusalem-departure";
+
+    return "jerusalem-aftermath";
+  }
+
+  return undefined;
 }
 
 export function EposExperience() {
@@ -368,7 +384,7 @@ export function EposExperience() {
     // Pausing stops Web Audio immediately. Reset only the finite environment
     // bed so resuming can restore place without replaying narration or the
     // historical event cue.
-    if (simulation.status === "paused") {
+    if (simulation.status === "paused" || simulation.status === "ready") {
       lastBattlefieldAmbienceId.current = undefined;
       return;
     }
@@ -448,10 +464,23 @@ export function EposExperience() {
       setNarrationAudioEnabled(false);
       cancelVoice();
       stopBattlefieldAudio();
+      lastBattlefieldEventId.current = undefined;
+      lastBattlefieldAmbienceId.current = undefined;
       return;
     }
 
     setNarrationAudioEnabled(true);
+    // Do not fire a battle cue merely because a learner unmutes while the
+    // timeline is paused. The next manual step or Play action schedules it.
+    lastBattlefieldEventId.current = simulation.status === "paused"
+      ? activeWorldEvent?.id
+      : undefined;
+    lastBattlefieldAmbienceId.current = undefined;
+    // This is still a direct speaker-button gesture, so it can resume Web
+    // Audio without restarting the narration the learner just muted.
+    void unlockBattlefieldAudio().then((unlocked) => {
+      if (unlocked) setBattlefieldAudioRevision((revision) => revision + 1);
+    });
   };
 
   const togglePlaybackWithNarration = () => {
@@ -460,9 +489,15 @@ export function EposExperience() {
     if (simulation.status === "running") {
       pauseVoice();
       stopBattlefieldAudio();
+      lastBattlefieldEventId.current = undefined;
       lastBattlefieldAmbienceId.current = undefined;
       togglePlayback();
       return;
+    }
+
+    if (simulation.status === "paused") {
+      lastBattlefieldEventId.current = undefined;
+      lastBattlefieldAmbienceId.current = undefined;
     }
 
     prepareBattlefieldAudio();

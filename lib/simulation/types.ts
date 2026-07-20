@@ -51,7 +51,7 @@ export type WindDirection =
   | "variable";
 
 export type InfrastructureStatus = "intact" | "strained" | "damaged" | "collapsed";
-export type WorldSceneTheme = "red-cliffs" | "waterloo" | "surabaya";
+export type WorldSceneTheme = "red-cliffs" | "waterloo" | "surabaya" | "jerusalem";
 export type EventKind =
   | "diplomacy"
   | "logistics"
@@ -74,7 +74,13 @@ export type WorldActionCue =
   | "radio-broadcast"
   | "ceasefire"
   | "aid-corridor"
-  | "urban-assault";
+  | "urban-assault"
+  | "siege-arrival"
+  | "water-scarcity"
+  | "siege-engine-build"
+  | "siege-assault"
+  | "siege-parley"
+  | "siege-aftermath";
 export type EvidenceKind = "historical-fact" | "historical-inference" | "speculation";
 export type SimulationStatus = "ready" | "running" | "paused" | "complete";
 export type SimulationPhase = "dawn" | "morning" | "afternoon" | "dusk" | "night";

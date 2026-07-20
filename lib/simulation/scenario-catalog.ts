@@ -1,4 +1,5 @@
 import { RED_CLIFFS_SCENARIO, RED_CLIFFS_WHAT_IF_PRESETS } from "./red-cliffs";
+import { JERUSALEM_SCENARIO, JERUSALEM_WHAT_IF_PRESETS } from "./jerusalem";
 import { SURABAYA_SCENARIO, SURABAYA_WHAT_IF_PRESETS } from "./surabaya";
 import { WATERLOO_SCENARIO, WATERLOO_WHAT_IF_PRESETS } from "./waterloo";
 import type { ScenarioDefinition, WhatIfModifier } from "./types";
@@ -98,15 +99,17 @@ export const SCENARIO_CATALOG: readonly ScenarioPack[] = [
     whatIfPresets: SURABAYA_WHAT_IF_PRESETS,
   },
   {
-    id: "jerusalem-1187",
-    title: "Siege of Jerusalem",
-    era: "1187 · Levant",
+    id: JERUSALEM_SCENARIO.id,
+    title: JERUSALEM_SCENARIO.title,
+    era: JERUSALEM_SCENARIO.era,
     locationLabel: "Jerusalem · Levant",
     coordinateLabel: "31.77° N · 35.21° E",
     learningFocus: ["diplomacy", "logistics", "civilian impact", "leadership"],
-    scopeNote: "A future model about water, negotiation, community protection, and the choices constrained by a siege.",
-    status: "preview",
-    previewNote: "Historical preview — the simulation model, source pack, and world are in development.",
+    scopeNote: "A playable, source-aware model of siege pressure, negotiation, ransom constraints, and civilian movement in 1187.",
+    status: "playable",
+    scenario: JERUSALEM_SCENARIO,
+    defaultAgentId: "balian-of-ibelin",
+    whatIfPresets: JERUSALEM_WHAT_IF_PRESETS,
   },
   {
     id: "mongol-central-asia-1219",
