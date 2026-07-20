@@ -1,4 +1,5 @@
 import { RED_CLIFFS_SCENARIO, RED_CLIFFS_WHAT_IF_PRESETS } from "./red-cliffs";
+import { SURABAYA_SCENARIO, SURABAYA_WHAT_IF_PRESETS } from "./surabaya";
 import { WATERLOO_SCENARIO, WATERLOO_WHAT_IF_PRESETS } from "./waterloo";
 import type { ScenarioDefinition, WhatIfModifier } from "./types";
 
@@ -84,15 +85,17 @@ export const SCENARIO_CATALOG: readonly ScenarioPack[] = [
     previewNote: "Historical preview — the simulation model, source pack, and world are in development.",
   },
   {
-    id: "surabaya-1945",
-    title: "Battle of Surabaya",
-    era: "Late October–November 1945 · Indonesia",
+    id: SURABAYA_SCENARIO.id,
+    title: SURABAYA_SCENARIO.title,
+    era: SURABAYA_SCENARIO.era,
     locationLabel: "Surabaya · Indonesia",
     coordinateLabel: "7.26° S · 112.75° E",
     learningFocus: ["diplomacy", "leadership", "civilian impact", "logistics"],
-    scopeNote: "A future model of communication, political legitimacy, civilian safety, and rapidly changing local conditions.",
-    status: "preview",
-    previewNote: "Historical preview — the simulation model, source pack, and world are in development.",
+    scopeNote: "A playable, source-aware model of communication breakdown, civilian safety, contested evidence, and changing urban routes.",
+    status: "playable",
+    scenario: SURABAYA_SCENARIO,
+    defaultAgentId: "gubernur-suryo",
+    whatIfPresets: SURABAYA_WHAT_IF_PRESETS,
   },
   {
     id: "jerusalem-1187",

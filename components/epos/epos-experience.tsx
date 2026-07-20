@@ -28,11 +28,17 @@ import { AnimatePresence, motion } from "framer-motion";
 import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import type { WorldEventCue, WorldSceneProps } from "@/components/epos/world-scene";
-import { useBattlefieldAudio } from "@/hooks/use-battlefield-audio";
+import { type BattlefieldAmbienceCue, useBattlefieldAudio } from "@/hooks/use-battlefield-audio";
 import { type SimulationVoiceBeat, useSimulationVoice } from "@/hooks/use-simulation-voice";
 import { getScenarioProgress, getSimulationOutcome } from "@/lib/simulation/engine";
 import { getScenarioPack, SCENARIO_CATALOG, type PreviewScenarioPack, type ScenarioPack } from "@/lib/simulation/scenario-catalog";
-import type { AgentMessage, AgentRuntimeState, EvidenceKind, SimulationLogEntry } from "@/lib/simulation/types";
+import type {
+  AgentMessage,
+  AgentRuntimeState,
+  EvidenceKind,
+  SimulationLogEntry,
+  WorldSceneTheme,
+} from "@/lib/simulation/types";
 import { useEposStore } from "@/stores/epos-store";
 
 const WorldScene = dynamic<WorldSceneProps>(
@@ -96,6 +102,15 @@ function resolveWhatIfPreset(
   if (/(supply|supplies|food|provisions|ammunition|ammo)/.test(normalized)) {
     return find((preset, text) => preset.type === "resource" || /(supply|food|ammo|ammunition)/.test(text));
   }
+  if (/(ceasefire|truce|ultimatum|negotia|renewed talks|talks)/.test(normalized)) {
+    return find((preset, text) => preset.type === "event" && /(ceasefire|truce|ultimatum|talk)/.test(text));
+  }
+  if (/(radio|broadcast|signal|message|communicat|rumou?r)/.test(normalized)) {
+    return find((preset, text) => preset.type === "infrastructure" && /(radio|message|communication|signal)/.test(text));
+  }
+  if (/(evacuat|corridor|shelter|aid|medic|civilian|safe route)/.test(normalized)) {
+    return find((preset, text) => preset.type === "infrastructure" && /(aid|evacuat|route|corridor|shelter)/.test(text));
+  }
   if (/(reinforcement|reinforce|arrive|arrival|prussian|blücher|blucher|troops)/.test(normalized)) {
     return find((preset, text) => preset.type === "reinforcement" || /(reinforce|arriv|prussian|blucher)/.test(text));
   }
@@ -104,6 +119,21 @@ function resolveWhatIfPreset(
   }
 
   return undefined;
+}
+
+function getSceneAmbienceCue(
+  sceneTheme: WorldSceneTheme | undefined,
+  tick: number,
+): BattlefieldAmbienceCue | undefined {
+  if (sceneTheme !== "surabaya") return undefined;
+
+  if (tick <= 1) return "surabaya-harbour";
+  if (tick === 2 || tick === 5) return "surabaya-radio-room";
+  if (tick === 3 || tick === 4) return "surabaya-street-lull";
+  if (tick === 6) return "surabaya-urban-pressure";
+  if (tick === 7) return "surabaya-aid-route";
+
+  return "surabaya-aftermath";
 }
 
 export function EposExperience() {
@@ -137,6 +167,7 @@ export function EposExperience() {
   const [manualSpeechMessage, setManualSpeechMessage] = useState<AgentMessage | null>(null);
   const lastQueuedNarrationId = useRef<string | undefined>(undefined);
   const lastBattlefieldEventId = useRef<string | undefined>(undefined);
+  const lastBattlefieldAmbienceId = useRef<string | undefined>(undefined);
   const [skippedNarrationId, setSkippedNarrationId] = useState<string | undefined>(undefined);
   const [battlefieldAudioRevision, setBattlefieldAudioRevision] = useState(0);
   const {
@@ -154,6 +185,7 @@ export function EposExperience() {
   const {
     unlock: unlockBattlefieldAudio,
     playCue: playBattlefieldCue,
+    playAmbience: playBattlefieldAmbience,
     stop: stopBattlefieldAudio,
   } = useBattlefieldAudio(narrationAudioEnabled);
 
@@ -166,6 +198,7 @@ export function EposExperience() {
   const outcome = getSimulationOutcome(simulation);
   const activeScenarioPack = getScenarioPack(simulation.scenario.id);
   const scenarioPresentation = simulation.scenario.presentation;
+  const sceneAmbienceCue = getSceneAmbienceCue(scenarioPresentation?.scene, simulation.tick);
   const metricLabels = scenarioPresentation?.metricLabels ?? {
     morale: "Coalition morale",
     supplies: "Supply resilience",
@@ -327,6 +360,36 @@ export function EposExperience() {
   }, [activeWorldEvent, battlefieldAudioRevision, narrationAudioEnabled, playBattlefieldCue]);
 
   useEffect(() => {
+    if (!sceneAmbienceCue) {
+      lastBattlefieldAmbienceId.current = undefined;
+      return;
+    }
+
+    // Pausing stops Web Audio immediately. Reset only the finite environment
+    // bed so resuming can restore place without replaying narration or the
+    // historical event cue.
+    if (simulation.status === "paused") {
+      lastBattlefieldAmbienceId.current = undefined;
+      return;
+    }
+
+    const ambienceId = `${simulation.scenario.id}:${simulation.tick}:${sceneAmbienceCue}`;
+    if (!narrationAudioEnabled || lastBattlefieldAmbienceId.current === ambienceId) return;
+
+    if (playBattlefieldAmbience(sceneAmbienceCue)) {
+      lastBattlefieldAmbienceId.current = ambienceId;
+    }
+  }, [
+    battlefieldAudioRevision,
+    narrationAudioEnabled,
+    playBattlefieldAmbience,
+    sceneAmbienceCue,
+    simulation.scenario.id,
+    simulation.status,
+    simulation.tick,
+  ]);
+
+  useEffect(() => {
     if (simulation.status !== "running" || isSpeaking || shouldAwaitNarrationCompletion) return;
 
     // Each event waits for its matching beat to complete, then advances at
@@ -397,6 +460,7 @@ export function EposExperience() {
     if (simulation.status === "running") {
       pauseVoice();
       stopBattlefieldAudio();
+      lastBattlefieldAmbienceId.current = undefined;
       togglePlayback();
       return;
     }
@@ -439,6 +503,7 @@ export function EposExperience() {
     setManualSpeechMessage(null);
     lastQueuedNarrationId.current = undefined;
     lastBattlefieldEventId.current = undefined;
+    lastBattlefieldAmbienceId.current = undefined;
     setSkippedNarrationId(undefined);
 
     if (simulation.modifiers.some((modifier) => modifier.id === preset.id)) {
@@ -464,6 +529,7 @@ export function EposExperience() {
     setManualSpeechMessage(null);
     lastQueuedNarrationId.current = undefined;
     lastBattlefieldEventId.current = undefined;
+    lastBattlefieldAmbienceId.current = undefined;
     setSkippedNarrationId(undefined);
     loadScenario(pack.scenario, pack.defaultAgentId);
     setSelectedPreview(null);
@@ -476,6 +542,7 @@ export function EposExperience() {
     setManualSpeechMessage(null);
     lastQueuedNarrationId.current = undefined;
     lastBattlefieldEventId.current = undefined;
+    lastBattlefieldAmbienceId.current = undefined;
     setSkippedNarrationId(undefined);
     restart();
   };
@@ -494,6 +561,7 @@ export function EposExperience() {
     setManualSpeechMessage(null);
     lastQueuedNarrationId.current = undefined;
     lastBattlefieldEventId.current = undefined;
+    lastBattlefieldAmbienceId.current = undefined;
     setSkippedNarrationId(undefined);
     jumpToTick(nextHistoricalMoment.tick);
   };

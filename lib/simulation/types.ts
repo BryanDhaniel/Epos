@@ -51,7 +51,7 @@ export type WindDirection =
   | "variable";
 
 export type InfrastructureStatus = "intact" | "strained" | "damaged" | "collapsed";
-export type WorldSceneTheme = "red-cliffs" | "waterloo";
+export type WorldSceneTheme = "red-cliffs" | "waterloo" | "surabaya";
 export type EventKind =
   | "diplomacy"
   | "logistics"
@@ -70,7 +70,11 @@ export type WorldActionCue =
   | "cavalry-charge"
   | "reinforcement-arrival"
   | "final-assault"
-  | "withdrawal";
+  | "withdrawal"
+  | "radio-broadcast"
+  | "ceasefire"
+  | "aid-corridor"
+  | "urban-assault";
 export type EvidenceKind = "historical-fact" | "historical-inference" | "speculation";
 export type SimulationStatus = "ready" | "running" | "paused" | "complete";
 export type SimulationPhase = "dawn" | "morning" | "afternoon" | "dusk" | "night";
@@ -176,6 +180,8 @@ export interface AgentRuntimeState extends ScenarioAgent {
   knowledge: readonly AgentKnowledge[];
   memory: readonly AgentMemory[];
   status: "active" | "traveling" | "occupied" | "retreating";
+  /** Allows a timeline to respectfully remove a person from the rendered world. */
+  renderVisible: boolean;
 }
 
 export interface FactionResources {
@@ -271,6 +277,11 @@ export type TimelineEffect =
       type: "set-agent-emotion";
       agentId: AgentId;
       emotion: EmotionalState;
+    })
+  | (TimelineEffectBase & {
+      type: "set-agent-visibility";
+      agentId: AgentId;
+      visible: boolean;
     })
   | (TimelineEffectBase & {
       type: "share-knowledge";

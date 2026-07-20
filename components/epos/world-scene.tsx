@@ -60,8 +60,6 @@ const factionTrimColors: Record<string, string> = {
 const skinTones = ["#e7bf9b", "#d9a980", "#efc9a7"] as const;
 const hairColors = ["#2d2528", "#49342a", "#1f2c34"] as const;
 
-const walkingRoles = new Set<AgentRuntimeState["role"]>(["messenger", "scout", "merchant", "soldier"]);
-
 function smoothstep(value: number) {
   const clamped = THREE.MathUtils.clamp(value, 0, 1);
   return clamped * clamped * (3 - 2 * clamped);
@@ -263,13 +261,289 @@ function RoleAccessory({ role, color, trim }: { role: AgentRuntimeState["role"];
   );
 }
 
-const offsets: readonly Vector3Tuple[] = [
-  [0, 0, 0],
-  [0.55, 0, 0.28],
-  [-0.45, 0, -0.3],
-  [0.2, 0, -0.58],
-  [-0.6, 0, 0.34],
-];
+type SceneObstacle = {
+  id: string;
+  position: Vector3Tuple;
+  /** A conservative 2D footprint used to keep avatar paths out of scenery. */
+  radius: number;
+};
+
+type AgentSlot = {
+  index: number;
+  count: number;
+};
+
+type AgentMotion = {
+  current: THREE.Vector3;
+  source: THREE.Vector3;
+  target: THREE.Vector3;
+  path: THREE.Vector3[];
+  nextPathIndex: number;
+  elapsed: number;
+  duration: number;
+  isMoving: boolean;
+};
+
+function sceneAgentAnchor(
+  sceneTheme: WorldSceneTheme,
+  location: ScenarioLocation,
+  agent: AgentRuntimeState,
+): Vector3Tuple {
+  const base: Vector3Tuple = [location.position.x, location.position.y, location.position.z];
+
+  // Cao Cao is deliberately staged on the raised flagship deck in Red Cliffs.
+  if (sceneTheme === "red-cliffs" && agent.id === "cao-cao") return base;
+
+  const sceneOffsets: Partial<Record<WorldSceneTheme, Record<string, Vector3Tuple>>> = {
+    "red-cliffs": {
+      xiakou: [0.1, 0, -1.72],
+      wulin: [-0.95, 0, 1.28],
+      "chibi-river": [0, 0, -1.42],
+      jiangxia: [0.8, 0, 1.8],
+      "wulin-road": [0.22, 0, 0.18],
+      "river-village": [0.16, 0, -1.45],
+    },
+    waterloo: {
+      "la-belle-alliance": [0.18, 0, -0.92],
+      "french-artillery-line": [1.14, 0, 0.78],
+      "hougoumont-approach": [-0.48, 0, -0.66],
+      "french-cavalry-assembly": [-0.34, 0, -0.82],
+      "allied-square-line": [0.22, 0, 0.18],
+      "mont-saint-jean": [0.08, 0, -0.86],
+      hougoumont: [-1.85, 0, -0.95],
+      "la-haye-sainte": [-1.85, 0, -0.75],
+      plancenoit: [0.44, 0, 0.92],
+      "prussian-east-approach": [-0.15, 0, 0.32],
+      "imperial-guard-staging": [-0.78, 0, -0.8],
+      "charleroi-withdrawal-road": [0.28, 0, 0.3],
+      "brussels-road": [-0.2, 0, -0.24],
+      "waterloo-village": [-0.8, 0, -0.9],
+    },
+    surabaya: {
+      "tanjung-perak": [0.08, 0, 2.42],
+      "tanjung-perak-port": [0.08, 0, 2.42],
+      "jembatan-merah": [0, 0, -1.46],
+      "red-bridge": [0, 0, -1.46],
+      "gedung-internatio": [1.45, 0, -1.15],
+      "radio-station": [0.18, 0, -1.68],
+      "radio-studio": [0.18, 0, -1.68],
+      "tkr-command": [0, 0, 1.65],
+      "aid-post": [1.55, 0, 0.25],
+      "kampung-refuge": [0, 0, 3],
+      "south-evacuation-road": [0.46, 0, 0.38],
+    },
+  };
+  const offset = sceneOffsets[sceneTheme]?.[location.id];
+  if (offset) return [base[0] + offset[0], base[1] + offset[1], base[2] + offset[2]];
+
+  // Future scenarios still receive a sensible clear-space staging point even
+  // before bespoke scene geometry has been authored.
+  const fallbackByKind: Record<ScenarioLocation["kind"], Vector3Tuple> = {
+    camp: [0.75, 0, -0.75],
+    harbor: [0, 0, -1.2],
+    river: [0, 0, -0.8],
+    village: [0.4, 0, -1.2],
+    fortress: [-1.05, 0, -0.82],
+    road: [0.24, 0, 0.18],
+    forest: [0.82, 0, -0.7],
+    farm: [-0.95, 0, -0.72],
+    ridge: [0.35, 0, -0.34],
+    field: [0.18, 0, 0.16],
+  };
+  const fallback = fallbackByKind[location.kind];
+  return [base[0] + fallback[0], base[1] + fallback[1], base[2] + fallback[2]];
+}
+
+function formationOffset(index: number, count: number, renderKind?: AgentRuntimeState["renderKind"]): Vector3Tuple {
+  if (count <= 1) return [0, 0, 0];
+
+  const ringIndex = Math.floor(index / 6);
+  const onRing = Math.min(6, count - ringIndex * 6);
+  const positionOnRing = index % 6;
+  const radius = (renderKind === "unit" ? 0.98 : 0.62) + ringIndex * 0.48;
+  const angle = -Math.PI / 2 + (positionOnRing / onRing) * Math.PI * 2;
+  return [Math.cos(angle) * radius, 0, Math.sin(angle) * radius];
+}
+
+function markerPositionForAgent(
+  sceneTheme: WorldSceneTheme,
+  agent: AgentRuntimeState,
+  location: ScenarioLocation | undefined,
+  slot: AgentSlot | undefined,
+  obstacles: readonly SceneObstacle[],
+): Vector3Tuple {
+  if (!location) return [0, 0, 0];
+
+  const anchor = sceneAgentAnchor(sceneTheme, location, agent);
+  const formation = formationOffset(slot?.index ?? 0, slot?.count ?? 1, agent.renderKind);
+  const surfaceHeight = sceneTheme === "red-cliffs" && agent.id === "cao-cao" ? 0.79 : anchor[1];
+  const desired: Vector3Tuple = [anchor[0] + formation[0], surfaceHeight, anchor[2] + formation[2]];
+  return makeAgentPositionSafe(
+    desired,
+    obstacles,
+    agent.id,
+    agent.renderKind === "unit" ? 0.7 : 0.3,
+  );
+}
+
+function makeAgentPositionSafe(
+  desired: Vector3Tuple,
+  obstacles: readonly SceneObstacle[],
+  agentId: string,
+  clearance: number,
+): Vector3Tuple {
+  const safe = new THREE.Vector3(desired[0], desired[1], desired[2]);
+  const seedAngle = (stableVariant(agentId, 360) * Math.PI) / 180;
+
+  // Several passes handle the rare case where a location sits between two
+  // neighbouring buildings. The values only affect the visual staging point;
+  // simulation locations remain the historical/data-model locations.
+  for (let pass = 0; pass < 4; pass += 1) {
+    let changed = false;
+    for (const obstacle of obstacles) {
+      const deltaX = safe.x - obstacle.position[0];
+      const deltaZ = safe.z - obstacle.position[2];
+      const distance = Math.hypot(deltaX, deltaZ);
+      const minimumDistance = obstacle.radius + clearance;
+      if (distance >= minimumDistance) continue;
+
+      const normalX = distance > 0.001 ? deltaX / distance : Math.cos(seedAngle + pass * 0.81);
+      const normalZ = distance > 0.001 ? deltaZ / distance : Math.sin(seedAngle + pass * 0.81);
+      safe.x = obstacle.position[0] + normalX * minimumDistance;
+      safe.z = obstacle.position[2] + normalZ * minimumDistance;
+      changed = true;
+    }
+    if (!changed) break;
+  }
+
+  return [safe.x, desired[1], safe.z];
+}
+
+function segmentDistanceToPoint(
+  from: THREE.Vector3,
+  to: THREE.Vector3,
+  point: Vector3Tuple,
+): { distance: number; progress: number } {
+  const deltaX = to.x - from.x;
+  const deltaZ = to.z - from.z;
+  const lengthSquared = deltaX * deltaX + deltaZ * deltaZ;
+  const progress = lengthSquared <= 0.0001
+    ? 0
+    : THREE.MathUtils.clamp(((point[0] - from.x) * deltaX + (point[2] - from.z) * deltaZ) / lengthSquared, 0, 1);
+  const closestX = from.x + deltaX * progress;
+  const closestZ = from.z + deltaZ * progress;
+  return { distance: Math.hypot(point[0] - closestX, point[2] - closestZ), progress };
+}
+
+function obstacleAwarePath(
+  from: THREE.Vector3,
+  to: THREE.Vector3,
+  obstacles: readonly SceneObstacle[],
+  agentId: string,
+  clearance: number,
+): THREE.Vector3[] {
+  const directDistance = from.distanceTo(to);
+  if (directDistance < 0.05 || obstacles.length === 0) return [to.clone()];
+
+  const direction = new THREE.Vector3(to.x - from.x, 0, to.z - from.z).normalize();
+  const perpendicular = new THREE.Vector3(-direction.z, 0, direction.x);
+  const route = obstacles
+    .map((obstacle) => ({ obstacle, ...segmentDistanceToPoint(from, to, obstacle.position) }))
+    .filter(({ obstacle, distance, progress }) => progress > 0.05 && progress < 0.95 && distance < obstacle.radius + clearance)
+    .sort((left, right) => left.progress - right.progress);
+  if (!route.length) return [to.clone()];
+
+  const waypoints: THREE.Vector3[] = [];
+  for (const { obstacle } of route) {
+    // Alternate sides in a deterministic way. Two points make the avatar arc
+    // around a footprint instead of snapping through its far side.
+    const side = stableVariant(`${agentId}-${obstacle.id}`, 2) === 0 ? -1 : 1;
+    const turnRadius = obstacle.radius + clearance + 0.18;
+    const along = Math.min(turnRadius * 0.86, directDistance * 0.16);
+    const center = new THREE.Vector3(obstacle.position[0], from.y, obstacle.position[2]);
+    const before = center.clone()
+      .addScaledVector(direction, -along)
+      .addScaledVector(perpendicular, side * turnRadius);
+    const after = center.clone()
+      .addScaledVector(direction, along)
+      .addScaledVector(perpendicular, side * turnRadius);
+
+    // Skip a detour that is effectively behind a previous one in a dense block.
+    const prior = waypoints[waypoints.length - 1] ?? from;
+    if (prior.distanceToSquared(before) > 0.04) waypoints.push(before);
+    if (before.distanceToSquared(after) > 0.04) waypoints.push(after);
+  }
+
+  waypoints.push(to.clone());
+  return waypoints;
+}
+
+function startNextMotionSegment(animation: AgentMotion) {
+  while (animation.nextPathIndex < animation.path.length) {
+    const next = animation.path[animation.nextPathIndex];
+    animation.nextPathIndex += 1;
+    const distance = animation.current.distanceTo(next);
+    if (distance < 0.035) continue;
+
+    animation.source.copy(animation.current);
+    animation.target.copy(next);
+    animation.duration = THREE.MathUtils.clamp(distance * 0.84, 0.72, 3.5);
+    animation.elapsed = 0;
+    animation.isMoving = true;
+    return true;
+  }
+
+  animation.current.copy(animation.target);
+  animation.isMoving = false;
+  return false;
+}
+
+function sceneObstacles(sceneTheme: WorldSceneTheme, locations: readonly ScenarioLocation[]): readonly SceneObstacle[] {
+  if (sceneTheme === "red-cliffs") {
+    return [
+      { id: "xiakou-tents", position: [-7.1, 0, 4.25], radius: 1.55 },
+      { id: "jiangxia-tents", position: [-4.15, 0, -4.4], radius: 1.35 },
+      { id: "river-village-west", position: [-3.45, 0, 5.72], radius: 1.3 },
+      { id: "river-village-center", position: [-0.62, 0, 5.85], radius: 1.28 },
+      { id: "river-village-east", position: [2.2, 0, 5.22], radius: 1.18 },
+    ];
+  }
+
+  if (sceneTheme === "waterloo") {
+    return [
+      { id: "la-haye-sainte", position: [1.2, 0, 0.2], radius: 1.62 },
+      { id: "hougoumont", position: [-0.7, 0, 5.5], radius: 1.82 },
+      { id: "plancenoit", position: [7.2, 0, -4.55], radius: 1.36 },
+      { id: "french-command-tent", position: [-8.2, 0, -1.7], radius: 1.12 },
+      { id: "allied-ridge-tents", position: [2.45, 0, 4.7], radius: 1.48 },
+    ];
+  }
+
+  const port = sceneLocationPosition(locations, ["tanjung-perak-port", "tanjung-perak"], [7, 0, -6]);
+  const bridge = sceneLocationPosition(locations, ["red-bridge", "jembatan-merah"], [0, 0, 0]);
+  const internatio = sceneLocationPosition(locations, ["gedung-internatio"], [1.6, 0, 1.5]);
+  const radio = sceneLocationPosition(locations, ["radio-studio", "radio-station"], [-5.7, 0, 2.4]);
+  const tkrCommand = sceneLocationPosition(locations, ["tkr-command"], [-4.8, 0, -2.6]);
+  const aidPost = sceneLocationPosition(locations, ["hospital-relief-corridor", "aid-post"], [-1.7, 0, -4.3]);
+  const kampung = sceneLocationPosition(locations, ["kampung-shelter", "kampung-refuge"], [-7.5, 0, 5.2]);
+
+  return [
+    { id: "port-warehouse-west", position: offsetPosition(port, -2.8, 0, 0.55), radius: 1.86 },
+    { id: "port-warehouse-east", position: offsetPosition(port, 2.7, 0, 0.55), radius: 1.68 },
+    { id: "bridge-shophouse-west", position: offsetPosition(bridge, -3.45, 0, 2.18), radius: 1.35 },
+    { id: "bridge-shophouse-east", position: offsetPosition(bridge, 3.8, 0, -2.4), radius: 1.35 },
+    { id: "internatio", position: offsetPosition(internatio, -1.55, 0, 1.75), radius: 1.56 },
+    { id: "radio-building", position: radio, radius: 1.28 },
+    { id: "command-tent-west", position: offsetPosition(tkrCommand, -1.48, 0, 0.32), radius: 0.9 },
+    { id: "command-tent-east", position: offsetPosition(tkrCommand, 1.52, 0, -0.78), radius: 0.82 },
+    { id: "aid-post", position: aidPost, radius: 1.02 },
+    { id: "kampung-west", position: offsetPosition(kampung, -2.1, 0, -0.8), radius: 0.82 },
+    { id: "kampung-south", position: offsetPosition(kampung, 0, 0, -2), radius: 0.82 },
+    { id: "kampung-east", position: offsetPosition(kampung, 2, 0, -0.7), radius: 0.82 },
+    { id: "kampung-northwest", position: offsetPosition(kampung, -1, 0, 1.25), radius: 0.82 },
+    { id: "kampung-northeast", position: offsetPosition(kampung, 1.2, 0, 1.25), radius: 0.82 },
+  ];
+}
 
 // One agent is roughly 1.4 world units tall. These dimensions keep the river
 // settlement, fleet, and vegetation in the same human-readable scale.
@@ -1135,6 +1409,7 @@ function UnitFormation({ color, trim }: { color: string; trim: string }) {
 function AgentMarker({
   agent,
   position,
+  navigationObstacles,
   selected,
   message,
   recipientName,
@@ -1143,6 +1418,7 @@ function AgentMarker({
 }: {
   agent: AgentRuntimeState;
   position: Vector3Tuple;
+  navigationObstacles: readonly SceneObstacle[];
   selected: boolean;
   message?: AgentMessage;
   recipientName?: string;
@@ -1162,6 +1438,9 @@ function AgentMarker({
     current: new THREE.Vector3(targetX, targetY, targetZ),
     source: new THREE.Vector3(targetX, targetY, targetZ),
     target: new THREE.Vector3(targetX, targetY, targetZ),
+    destination: new THREE.Vector3(targetX, targetY, targetZ),
+    path: [] as THREE.Vector3[],
+    nextPathIndex: 0,
     elapsed: 1,
     duration: 1,
     isMoving: false,
@@ -1171,47 +1450,57 @@ function AgentMarker({
   const trim = factionTrimColors[agent.factionId] ?? factionTrimColors.neutral;
   const skin = skinTones[stableVariant(agent.id, skinTones.length)];
   const hair = hairColors[stableVariant(`${agent.id}-hair`, hairColors.length)];
+  const bodyClearance = agent.renderKind === "unit" ? 0.7 : 0.3;
 
   useEffect(() => {
-    const next = new THREE.Vector3(targetX, targetY, targetZ);
     const animation = motion.current;
+    const safeTarget = makeAgentPositionSafe(
+      [targetX, targetY, targetZ],
+      navigationObstacles,
+      agent.id,
+      bodyClearance,
+    );
+    const next = new THREE.Vector3(safeTarget[0], safeTarget[1], safeTarget[2]);
 
-    if (animation.target.distanceToSquared(next) < 0.0001) return;
+    if (animation.destination.distanceToSquared(next) < 0.0001) return;
 
-    animation.source.copy(animation.current);
-    animation.target.copy(next);
-    const distance = animation.source.distanceTo(next);
-    animation.duration = THREE.MathUtils.clamp(distance * 0.82, 1.7, 5.8);
-    animation.elapsed = 0;
-    animation.isMoving = distance > 0.04;
-  }, [targetX, targetY, targetZ]);
+    animation.destination.copy(next);
+    animation.path = obstacleAwarePath(
+      animation.current,
+      next,
+      navigationObstacles,
+      agent.id,
+      bodyClearance,
+    );
+    animation.nextPathIndex = 0;
+    startNextMotionSegment(animation);
+  }, [agent.id, bodyClearance, navigationObstacles, targetX, targetY, targetZ]);
 
   useFrame(({ clock }, delta) => {
     if (!group.current) return;
     const animation = motion.current;
 
-    if (animation.elapsed < animation.duration) {
+    if (animation.isMoving && animation.elapsed < animation.duration) {
       animation.elapsed = Math.min(animation.duration, animation.elapsed + delta);
       const progress = smoothstep(animation.elapsed / animation.duration);
       animation.current.lerpVectors(animation.source, animation.target, progress);
       animation.isMoving = animation.elapsed < animation.duration;
     } else {
       animation.current.copy(animation.target);
-      animation.isMoving = false;
+      startNextMotionSegment(animation);
     }
 
-    const patrolPhase = clock.elapsedTime * 0.72 + stableVariant(agent.id, 97) * 0.42;
-    const isPatrolling = !animation.isMoving && !message && walkingRoles.has(agent.role);
-    const patrolX = isPatrolling ? Math.sin(patrolPhase) * 0.16 : 0;
-    const patrolZ = isPatrolling ? Math.cos(patrolPhase * 0.84) * 0.12 : 0;
-    const isWalking = animation.isMoving || isPatrolling;
+    // A free idle patrol looks lively in an empty field, but it can send a
+    // person through a wall or into another character in dense worlds. Agents
+    // now move only along the intentional, obstacle-aware route above.
+    const isWalking = animation.isMoving;
     const step = Math.sin(clock.elapsedTime * (isWalking ? 4.35 : 1.25) + targetX * 0.75);
     const rest = Math.sin(clock.elapsedTime * 1.15 + targetZ) * 0.015;
 
     group.current.position.set(
-      animation.current.x + patrolX,
+      animation.current.x,
       animation.current.y + 0.045,
-      animation.current.z + patrolZ,
+      animation.current.z,
     );
 
     if (animation.isMoving) {
@@ -1220,11 +1509,6 @@ function AgentMarker({
         const facing = Math.atan2(travelDirection.x, travelDirection.z);
         group.current.rotation.y = THREE.MathUtils.damp(group.current.rotation.y, facing, 9, delta);
       }
-    } else if (isPatrolling) {
-      const patrolVelocityX = Math.cos(patrolPhase) * 0.16 * 0.72;
-      const patrolVelocityZ = -Math.sin(patrolPhase * 0.84) * 0.12 * 0.84 * 0.72;
-      const facing = Math.atan2(patrolVelocityX, patrolVelocityZ);
-      group.current.rotation.y = THREE.MathUtils.damp(group.current.rotation.y, facing, 4.5, delta);
     } else {
       const idleFacing = Math.sin(clock.elapsedTime * 0.42 + targetX) * 0.035;
       group.current.rotation.y = THREE.MathUtils.damp(group.current.rotation.y, idleFacing, 2, delta);
@@ -1615,6 +1899,658 @@ function WaterlooScenery({
   );
 }
 
+function sceneLocationPosition(
+  locations: readonly ScenarioLocation[],
+  ids: readonly string[],
+  fallback: Vector3Tuple,
+): Vector3Tuple {
+  const location = locations.find((candidate) => ids.includes(candidate.id));
+  return location
+    ? [location.position.x, location.position.y, location.position.z]
+    : fallback;
+}
+
+function offsetPosition(origin: Vector3Tuple, x: number, y: number, z: number): Vector3Tuple {
+  return [origin[0] + x, origin[1] + y, origin[2] + z];
+}
+
+function routeLength(from: Vector3Tuple, to: Vector3Tuple) {
+  return Math.max(1, Math.hypot(to[0] - from[0], to[2] - from[2]));
+}
+
+function routeRotation(from: Vector3Tuple, to: Vector3Tuple) {
+  // Roads, canals, and bridge decks are authored along their local Z axis.
+  return Math.atan2(to[0] - from[0], to[2] - from[2]);
+}
+
+function routeMidpoint(from: Vector3Tuple, to: Vector3Tuple): Vector3Tuple {
+  return [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, (from[2] + to[2]) / 2];
+}
+
+/** A compact two-storey shop-house used to suggest Surabaya's dense city fabric. */
+function SurabayaShophouse({
+  position,
+  scale = 1,
+  rotation = 0,
+  wall = "#b58c65",
+  awning = "#a44e42",
+}: {
+  position: Vector3Tuple;
+  scale?: number;
+  rotation?: number;
+  wall?: string;
+  awning?: string;
+}) {
+  return (
+    <group position={position} scale={scale} rotation={[0, rotation, 0]}>
+      <mesh receiveShadow position={[0, 0.06, 0]}>
+        <boxGeometry args={[2.34, 0.12, 1.45]} />
+        <meshStandardMaterial color="#6a5140" roughness={1} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[0, 1.04, 0]}>
+        <boxGeometry args={[2.12, 1.92, 1.28]} />
+        <meshStandardMaterial color={wall} roughness={0.95} />
+      </mesh>
+      <mesh castShadow position={[0, 2.15, 0]} scale={[1.26, 0.48, 0.82]}>
+        <coneGeometry args={[1, 1, 4]} />
+        <meshStandardMaterial color="#6f4f43" roughness={0.94} flatShading />
+      </mesh>
+      <mesh castShadow position={[0, 0.57, 0.655]}>
+        <boxGeometry args={[1.82, 0.27, 0.23]} />
+        <meshStandardMaterial color={awning} roughness={0.86} />
+      </mesh>
+      <mesh castShadow position={[0, 0.52, 0.652]}>
+        <boxGeometry args={[0.43, 0.86, 0.035]} />
+        <meshStandardMaterial color="#513c31" roughness={0.96} />
+      </mesh>
+      {[-0.7, 0.7].map((x) => (
+        <mesh key={x} position={[x, 1.36, 0.653]}>
+          <boxGeometry args={[0.35, 0.36, 0.032]} />
+          <meshStandardMaterial color="#d9d6ba" roughness={0.82} />
+        </mesh>
+      ))}
+      {[-0.65, 0.65].map((x) => (
+        <mesh key={`post-${x}`} castShadow position={[x, 0.43, 0.76]}>
+          <cylinderGeometry args={[0.035, 0.035, 0.94, 5]} />
+          <meshStandardMaterial color="#694b35" roughness={0.95} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function KampungHouse({
+  position,
+  scale = 1,
+  rotation = 0,
+  wall = "#ad9068",
+}: {
+  position: Vector3Tuple;
+  scale?: number;
+  rotation?: number;
+  wall?: string;
+}) {
+  return (
+    <group position={position} scale={scale} rotation={[0, rotation, 0]}>
+      <mesh receiveShadow position={[0, 0.055, 0]}>
+        <boxGeometry args={[1.7, 0.11, 1.38]} />
+        <meshStandardMaterial color="#765945" roughness={1} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[0, 0.65, 0]}>
+        <boxGeometry args={[1.56, 1.15, 1.25]} />
+        <meshStandardMaterial color={wall} roughness={0.98} />
+      </mesh>
+      <mesh castShadow position={[0, 1.43, 0]} rotation={[0, Math.PI / 4, 0]} scale={[1.16, 0.53, 0.9]}>
+        <coneGeometry args={[1, 1, 4]} />
+        <meshStandardMaterial color="#7a5140" roughness={0.96} flatShading />
+      </mesh>
+      <mesh castShadow position={[0, 0.42, 0.635]}>
+        <boxGeometry args={[0.34, 0.68, 0.032]} />
+        <meshStandardMaterial color="#5d4335" roughness={0.96} />
+      </mesh>
+      <mesh position={[-0.48, 0.8, 0.638]}>
+        <boxGeometry args={[0.28, 0.23, 0.025]} />
+        <meshStandardMaterial color="#d6d4b5" roughness={0.84} />
+      </mesh>
+    </group>
+  );
+}
+
+function PortWarehouse({ position, rotation = 0, scale = 1 }: { position: Vector3Tuple; rotation?: number; scale?: number }) {
+  return (
+    <group position={position} rotation={[0, rotation, 0]} scale={scale}>
+      <mesh receiveShadow position={[0, 0.08, 0]}>
+        <boxGeometry args={[3.85, 0.16, 2.16]} />
+        <meshStandardMaterial color="#655445" roughness={1} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[0, 1.12, 0]}>
+        <boxGeometry args={[3.62, 2.02, 1.98]} />
+        <meshStandardMaterial color="#a47b58" roughness={0.96} />
+      </mesh>
+      <mesh castShadow position={[0, 2.24, 0]} scale={[2.06, 0.54, 1.17]}>
+        <coneGeometry args={[1, 1, 4]} />
+        <meshStandardMaterial color="#5c504b" roughness={0.86} flatShading />
+      </mesh>
+      {[-1.15, 0, 1.15].map((x) => (
+        <mesh key={x} castShadow position={[x, 0.57, 1.005]}>
+          <boxGeometry args={[0.52, 0.96, 0.04]} />
+          <meshStandardMaterial color="#554036" roughness={0.96} />
+        </mesh>
+      ))}
+      {[-1.3, 1.3].map((x) => (
+        <mesh key={`crate-${x}`} castShadow position={[x, 0.26, 1.36]}>
+          <boxGeometry args={[0.47, 0.46, 0.45]} />
+          <meshStandardMaterial color="#8a613f" roughness={0.95} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function CityRoad({
+  position,
+  length,
+  width = 1.65,
+  rotation = 0,
+}: {
+  position: Vector3Tuple;
+  length: number;
+  width?: number;
+  rotation?: number;
+}) {
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <mesh receiveShadow position={[0, -0.106, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[width, length]} />
+        <meshStandardMaterial color="#6d675f" roughness={0.98} />
+      </mesh>
+      {[-0.4, 0.4].map((x) => (
+        <mesh key={x} receiveShadow position={[x * width, -0.099, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.028, length * 0.94]} />
+          <meshStandardMaterial color="#b8a77c" roughness={1} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function KaliMasCanal({
+  position,
+  length,
+  width = 2.65,
+  rotation = 0,
+}: {
+  position: Vector3Tuple;
+  length: number;
+  width?: number;
+  rotation?: number;
+}) {
+  const ripples = useRef<THREE.Group>(null);
+
+  useFrame(({ clock }) => {
+    if (!ripples.current) return;
+    ripples.current.children.forEach((ripple, index) => {
+      const travel = ((clock.elapsedTime * 0.48 + index * 1.8) % (length + 2)) - length / 2 - 1;
+      ripple.position.z = travel;
+      ripple.scale.x = 0.62 + Math.sin(clock.elapsedTime * 1.8 + index) * 0.14;
+    });
+  });
+
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <mesh receiveShadow position={[0, -0.115, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[width, length]} />
+        <meshStandardMaterial color="#3c7d91" roughness={0.34} metalness={0.16} />
+      </mesh>
+      {[-1, 1].map((side) => (
+        <group key={side} position={[side * (width / 2 + 0.2), 0, 0]}>
+          <mesh receiveShadow position={[0, -0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[0.36, length + 0.6]} />
+            <meshStandardMaterial color="#8d8067" roughness={1} />
+          </mesh>
+          {Array.from({ length: Math.max(4, Math.floor(length / 2.7)) }, (_, index) => (
+            <mesh key={index} castShadow position={[side * 0.12, 0.11, -length / 2 + 1.05 + index * 2.55]}>
+              <boxGeometry args={[0.22, 0.24, 0.58]} />
+              <meshStandardMaterial color="#756550" roughness={1} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+      <group ref={ripples} position={[0, -0.08, 0]}>
+        {Array.from({ length: 7 }, (_, index) => (
+          <mesh key={index} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[width * 0.5, 0.022]} />
+            <meshBasicMaterial color="#d4eeec" transparent opacity={0.16} depthWrite={false} />
+          </mesh>
+        ))}
+      </group>
+    </group>
+  );
+}
+
+function RedBridge({ position, rotation = 0 }: { position: Vector3Tuple; rotation?: number }) {
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <mesh castShadow receiveShadow position={[0, 0.34, 0]}>
+        <boxGeometry args={[3.2, 0.24, 1.28]} />
+        <meshStandardMaterial color="#a94c3d" roughness={0.82} metalness={0.13} />
+      </mesh>
+      {[-1.26, 1.26].map((x) => (
+        <mesh key={x} castShadow position={[x, 0.66, 0]}>
+          <boxGeometry args={[0.13, 0.67, 1.46]} />
+          <meshStandardMaterial color="#833a33" roughness={0.88} />
+        </mesh>
+      ))}
+      {[-0.44, 0.44].map((z) => (
+        <mesh key={z} castShadow position={[0, 1.06, z]} rotation={[0, Math.PI / 2, 0]}>
+          <cylinderGeometry args={[0.04, 0.04, 2.55, 6]} />
+          <meshStandardMaterial color="#833a33" roughness={0.9} />
+        </mesh>
+      ))}
+      {[-0.44, 0.44].flatMap((z) => [-1.1, 0, 1.1].map((x) => [x, z] as const)).map(([x, z]) => (
+        <mesh key={`${x}-${z}`} castShadow position={[x, 0.82, z]}>
+          <cylinderGeometry args={[0.045, 0.045, 0.55, 6]} />
+          <meshStandardMaterial color="#833a33" roughness={0.9} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function RadioStation({ position, rotation = 0 }: { position: Vector3Tuple; rotation?: number }) {
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <SurabayaShophouse position={[0, 0, 0]} scale={0.9} wall="#b99a71" awning="#4d7681" />
+      <mesh castShadow position={[0.72, 3.06, -0.15]}>
+        <cylinderGeometry args={[0.045, 0.055, 3.2, 6]} />
+        <meshStandardMaterial color="#4a4d4c" roughness={0.72} metalness={0.2} />
+      </mesh>
+      {[-0.47, 0.47].map((x) => (
+        <mesh key={x} castShadow position={[0.72 + x * 0.36, 2.2, -0.15]} rotation={[0, 0, x * 0.57]}>
+          <cylinderGeometry args={[0.018, 0.018, 1.5, 5]} />
+          <meshStandardMaterial color="#59605e" roughness={0.86} />
+        </mesh>
+      ))}
+      <mesh castShadow position={[-0.2, 0.65, 0.82]}>
+        <boxGeometry args={[0.65, 0.3, 0.1]} />
+        <meshStandardMaterial color="#e0d3a7" roughness={0.88} />
+      </mesh>
+    </group>
+  );
+}
+
+function ReliefPost({ position }: { position: Vector3Tuple }) {
+  return (
+    <group position={position}>
+      <Tent position={[0, 0, 0]} color="#dfd5be" rotation={0.08} scale={0.96} />
+      <mesh castShadow position={[0, 1.16, 0.9]}>
+        <boxGeometry args={[0.35, 0.35, 0.04]} />
+        <meshStandardMaterial color="#f4f0df" roughness={0.88} />
+      </mesh>
+      <mesh position={[0, 1.16, 0.925]}>
+        <boxGeometry args={[0.22, 0.055, 0.012]} />
+        <meshBasicMaterial color="#bd5753" />
+      </mesh>
+      <mesh position={[0, 1.16, 0.932]}>
+        <boxGeometry args={[0.055, 0.22, 0.012]} />
+        <meshBasicMaterial color="#bd5753" />
+      </mesh>
+      {[-0.84, 0.86].map((x) => (
+        <mesh key={x} castShadow position={[x, 0.23, 0.52]}>
+          <boxGeometry args={[0.45, 0.42, 0.42]} />
+          <meshStandardMaterial color="#987048" roughness={0.95} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function PalmTree({ position, scale = 1 }: { position: Vector3Tuple; scale?: number }) {
+  return (
+    <group position={position} scale={scale}>
+      <mesh castShadow position={[0, 1.4, 0]} rotation={[0.1, 0, -0.08]}>
+        <cylinderGeometry args={[0.12, 0.2, 2.8, 7]} />
+        <meshStandardMaterial color="#75543a" roughness={0.96} />
+      </mesh>
+      {Array.from({ length: 7 }, (_, index) => {
+        const rotation = (index / 7) * Math.PI * 2;
+        return (
+          <mesh key={index} castShadow position={[Math.cos(rotation) * 0.42, 2.9, Math.sin(rotation) * 0.42]} rotation={[0.22, -rotation, 0.55]}>
+            <coneGeometry args={[0.28, 1.56, 4]} />
+            <meshStandardMaterial color={index % 2 ? "#397257" : "#4d805e"} roughness={1} flatShading />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+function RadioSignal({ position }: { position: Vector3Tuple }) {
+  const signal = useRef<THREE.Group>(null);
+
+  useFrame(({ clock }) => {
+    if (!signal.current) return;
+    signal.current.children.forEach((ring, index) => {
+      const pulse = (clock.elapsedTime * 0.72 + index * 0.34) % 1;
+      ring.scale.setScalar(0.72 + pulse * 0.76);
+      const material = (ring as THREE.Mesh).material as THREE.MeshBasicMaterial;
+      material.opacity = (1 - pulse) * 0.3;
+    });
+  });
+
+  return (
+    <group ref={signal} position={offsetPosition(position, 0.72, 4.38, -0.15)} rotation={[Math.PI / 2, 0, 0]}>
+      {[0, 1, 2].map((index) => (
+        <mesh key={index} rotation={[0, 0, (index - 1) * 0.18]}>
+          <torusGeometry args={[0.65 + index * 0.37, 0.025, 5, 20, Math.PI * 1.2]} />
+          <meshBasicMaterial color="#f0ce76" transparent opacity={0.26} depthWrite={false} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function AidRouteMarkers({
+  from,
+  to,
+  count = 7,
+}: {
+  from: Vector3Tuple;
+  to: Vector3Tuple;
+  count?: number;
+}) {
+  const markers = useRef<THREE.Group>(null);
+
+  useFrame(({ clock }) => {
+    if (!markers.current) return;
+    markers.current.children.forEach((marker, index) => {
+      const pulse = 0.7 + Math.sin(clock.elapsedTime * 2.25 - index * 0.52) * 0.18;
+      marker.scale.setScalar(pulse);
+      (marker as THREE.Mesh).position.y = 0.08 + Math.max(0, Math.sin(clock.elapsedTime * 2.25 - index * 0.52)) * 0.13;
+    });
+  });
+
+  return (
+    <group ref={markers}>
+      {Array.from({ length: count }, (_, index) => {
+        const progress = (index + 1) / (count + 1);
+        return (
+          <mesh
+            key={index}
+            position={[
+              THREE.MathUtils.lerp(from[0], to[0], progress),
+              0.08,
+              THREE.MathUtils.lerp(from[2], to[2], progress),
+            ]}
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
+            <ringGeometry args={[0.1, 0.19, 16]} />
+            <meshBasicMaterial color="#e9c86b" transparent opacity={0.72} depthWrite={false} />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+/** A once-per-event distant impact: flash first, then a short rising plume. */
+function FiniteUrbanBurst({
+  position,
+  delay = 0,
+  scale = 1,
+}: {
+  position: Vector3Tuple;
+  delay?: number;
+  scale?: number;
+}) {
+  const group = useRef<THREE.Group>(null);
+  const flash = useRef<THREE.Mesh>(null);
+  const smoke = useRef<THREE.Group>(null);
+  const light = useRef<THREE.PointLight>(null);
+  const startedAt = useRef<number | null>(null);
+
+  useFrame(({ clock }) => {
+    if (startedAt.current === null) startedAt.current = clock.elapsedTime;
+    const elapsed = clock.elapsedTime - startedAt.current - delay;
+    const visible = elapsed >= 0 && elapsed < 5.4;
+
+    if (group.current) group.current.visible = visible;
+    if (!visible) return;
+
+    const flashStrength = THREE.MathUtils.clamp(1 - elapsed / 0.2, 0, 1);
+    const smokeProgress = THREE.MathUtils.clamp(elapsed / 5.2, 0, 1);
+
+    if (flash.current) {
+      flash.current.scale.setScalar((0.22 + flashStrength * 1.05) * scale);
+      (flash.current.material as THREE.MeshBasicMaterial).opacity = flashStrength * 0.84;
+    }
+    if (light.current) light.current.intensity = flashStrength * 3.2 * scale;
+    if (smoke.current) {
+      smoke.current.children.forEach((particle, index) => {
+        const spread = (0.1 + smokeProgress * 0.52) * scale;
+        const drift = Math.sin(elapsed * 0.62 + index * 1.9) * 0.08 * scale;
+        particle.position.set(
+          Math.cos(index * 1.74) * spread + drift,
+          0.3 + smokeProgress * (1.35 + index * 0.1) * scale,
+          Math.sin(index * 1.51) * spread,
+        );
+        particle.scale.setScalar((0.2 + smokeProgress * 0.72) * scale);
+        (particle as THREE.Mesh).visible = smokeProgress < 0.98;
+      });
+    }
+  });
+
+  return (
+    <group ref={group} position={position}>
+      <mesh ref={flash} position={[0, 0.34, 0]} rotation={[0.2, 0.2, 0]}>
+        <octahedronGeometry args={[0.45, 0]} />
+        <meshBasicMaterial color="#ffd38a" transparent opacity={0} />
+      </mesh>
+      <group ref={smoke}>
+        {[0, 1, 2, 3].map((index) => (
+          <mesh key={index} castShadow>
+            <dodecahedronGeometry args={[0.27, 0]} />
+            <meshStandardMaterial color="#596067" transparent opacity={0.4} roughness={1} flatShading />
+          </mesh>
+        ))}
+      </group>
+      <pointLight ref={light} color="#ffc46d" distance={4.2} intensity={0} position={[0, 0.6, 0]} />
+    </group>
+  );
+}
+
+/**
+ * A small, readable street obstacle for the Surabaya escalation. It grounds
+ * the action in interrupted movement and contested routes rather than making
+ * the city look like a continuous explosion effect.
+ */
+function StreetBarricade({
+  position,
+  rotation = 0,
+  accent = "#8a6b4d",
+}: {
+  position: Vector3Tuple;
+  rotation?: number;
+  accent?: string;
+}) {
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      {[-0.56, -0.19, 0.19, 0.56].map((x, index) => (
+        <mesh key={`sandbag-${x}`} castShadow receiveShadow position={[x, 0.16 + (index % 2) * 0.035, 0]} scale={[1, 0.72, 1.18]}>
+          <dodecahedronGeometry args={[0.22, 0]} />
+          <meshStandardMaterial color={index % 2 ? "#8f8064" : "#9b8b6c"} roughness={1} flatShading />
+        </mesh>
+      ))}
+      <mesh castShadow receiveShadow position={[0, 0.42, 0.03]} rotation={[0.08, 0, -0.1]}>
+        <boxGeometry args={[1.55, 0.13, 0.18]} />
+        <meshStandardMaterial color="#6a513d" roughness={0.96} />
+      </mesh>
+      <mesh castShadow position={[-0.34, 0.58, 0.05]} rotation={[0, 0.16, -0.42]}>
+        <boxGeometry args={[0.1, 0.96, 0.1]} />
+        <meshStandardMaterial color="#6a513d" roughness={0.96} />
+      </mesh>
+      <mesh castShadow position={[0.34, 0.55, 0.05]} rotation={[0, -0.12, 0.37]}>
+        <boxGeometry args={[0.1, 0.88, 0.1]} />
+        <meshStandardMaterial color="#6a513d" roughness={0.96} />
+      </mesh>
+      <mesh castShadow position={[0, 0.66, 0.03]} rotation={[0.08, 0, -0.04]}>
+        <boxGeometry args={[1.2, 0.09, 0.12]} />
+        <meshStandardMaterial color={accent} roughness={0.94} />
+      </mesh>
+    </group>
+  );
+}
+
+function UrbanBattleSequence({
+  bridge,
+  internatio,
+  hospital,
+  wonokromo,
+}: {
+  bridge: Vector3Tuple;
+  internatio: Vector3Tuple;
+  hospital: Vector3Tuple;
+  wonokromo: Vector3Tuple;
+}) {
+  return (
+    <group>
+      {/* The sequence lasts only once per event: road blockages, three distant
+          impacts, and a marked aid route make the consequences legible without
+          turning the city into a continuous combat loop. */}
+      <StreetBarricade position={offsetPosition(bridge, -1.34, 0, -0.44)} rotation={0.24} accent="#8c5b42" />
+      <StreetBarricade position={offsetPosition(bridge, 1.48, 0, 0.58)} rotation={-0.2} accent="#667a68" />
+      <FiniteUrbanBurst position={offsetPosition(bridge, -0.72, 0.06, -0.28)} delay={0.38} scale={0.76} />
+      <FiniteUrbanBurst position={offsetPosition(bridge, 1.18, 0.08, 0.92)} delay={2.7} scale={0.66} />
+      <FiniteUrbanBurst position={offsetPosition(internatio, 1.1, 0.08, -0.72)} delay={5.2} scale={0.58} />
+      <AidRouteMarkers from={hospital} to={wonokromo} count={5} />
+    </group>
+  );
+}
+
+function CeasefireMarker({ position }: { position: Vector3Tuple }) {
+  const flag = useRef<THREE.Mesh>(null);
+
+  useFrame(({ clock }) => {
+    if (flag.current) flag.current.rotation.y = Math.sin(clock.elapsedTime * 1.2) * 0.14;
+  });
+
+  return (
+    <group position={offsetPosition(position, 0, 1.2, -0.65)}>
+      <mesh castShadow position={[0, 0.75, 0]}>
+        <cylinderGeometry args={[0.018, 0.018, 1.5, 5]} />
+        <meshStandardMaterial color="#59493d" roughness={0.95} />
+      </mesh>
+      <mesh ref={flag} position={[0.26, 1.2, 0]}>
+        <planeGeometry args={[0.5, 0.3]} />
+        <meshStandardMaterial color="#f0eee2" side={THREE.DoubleSide} roughness={0.9} />
+      </mesh>
+    </group>
+  );
+}
+
+function SurabayaScenery({
+  weather,
+  locations,
+}: {
+  weather: WeatherState;
+  locations: readonly ScenarioLocation[];
+}) {
+  const wet = weather.condition === "rain" || weather.condition === "storm";
+  const skyColor = wet ? "#899ba0" : "#b6c5c0";
+  const sunPosition: Vector3Tuple = wet ? [-9, 7, 6] : [-11, 11, 5];
+  const port = sceneLocationPosition(locations, ["tanjung-perak-port", "tanjung-perak"], [7, 0, -6]);
+  const bridge = sceneLocationPosition(locations, ["red-bridge", "jembatan-merah"], [0, 0, 0]);
+  const internatio = sceneLocationPosition(locations, ["gedung-internatio", "kalimas-warehouses", "kalimas-warehouse"], [1.6, 0, 1.5]);
+  const radio = sceneLocationPosition(locations, ["radio-studio", "radio-station"], [-5.7, 0, 2.4]);
+  const kampung = sceneLocationPosition(locations, ["kampung-shelter", "kampung-refuge"], [-7.5, 0, 5.2]);
+  const tkrCommand = sceneLocationPosition(locations, ["tkr-command", "southern-perimeter", "south-perimeter"], [-4.8, 0, -2.6]);
+  const hospital = sceneLocationPosition(locations, ["hospital-relief-corridor", "aid-post"], [-1.7, 0, -4.3]);
+  const wonokromo = sceneLocationPosition(locations, ["wonokromo-evacuation-route", "south-evacuation-road"], [-9.8, 0, -7.2]);
+  const offshore = sceneLocationPosition(locations, ["offshore-command", "offshore-command-post"], [11, 0, -8]);
+  const canalCenter = routeMidpoint(bridge, internatio);
+  const canalLength = routeLength(bridge, internatio) + 2.6;
+  const canalRotation = routeRotation(bridge, internatio);
+
+  return (
+    <>
+      <Sky distance={450000} sunPosition={sunPosition} turbidity={wet ? 13 : 8} rayleigh={wet ? 0.55 : 0.9} mieCoefficient={0.009} mieDirectionalG={0.78} />
+      <fog attach="fog" args={[skyColor, 19, 47]} />
+      <hemisphereLight args={["#d9e1dc", "#4b594a", 1.95]} />
+      <directionalLight castShadow position={sunPosition} intensity={wet ? 1.6 : 2.15} color={wet ? "#e1e8e5" : "#fff0ca"} shadow-mapSize-width={1536} shadow-mapSize-height={1536} shadow-bias={-0.00016} />
+      <directionalLight position={[12, 7, -11]} intensity={0.33} color="#a9c5d2" />
+
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.15, 0]}>
+        <planeGeometry args={[46, 32]} />
+        <meshStandardMaterial color={wet ? "#718070" : "#879175"} roughness={1} />
+      </mesh>
+      <TerrainPatch position={[-12.2, -0.13, 4.7]} scale={[6.8, 4.8, 1]} color={wet ? "#627658" : "#75875d"} rotation={0.18} />
+      <TerrainPatch position={[10.2, -0.13, 5.2]} scale={[6.5, 4.4, 1]} color="#788b65" rotation={-0.22} />
+      <TerrainPatch position={[13.3, -0.13, -7.1]} scale={[4.5, 3.3, 1]} color="#74845f" rotation={0.1} />
+
+      <KaliMasCanal position={canalCenter} length={canalLength} rotation={canalRotation} />
+      {/* A separate harbour basin keeps the docks, warehouses, and water in one readable block. */}
+      <KaliMasCanal position={offsetPosition(port, 0, 0, -3.1)} length={8.8} width={5} />
+      <CityRoad position={routeMidpoint(port, bridge)} length={routeLength(port, bridge) + 1.3} width={2.05} rotation={routeRotation(port, bridge)} />
+      <CityRoad position={routeMidpoint(bridge, radio)} length={routeLength(bridge, radio) + 0.7} width={1.55} rotation={routeRotation(bridge, radio)} />
+      <CityRoad position={routeMidpoint(bridge, wonokromo)} length={routeLength(bridge, wonokromo) + 1.3} width={1.65} rotation={routeRotation(bridge, wonokromo)} />
+      <CityRoad position={routeMidpoint(hospital, wonokromo)} length={routeLength(hospital, wonokromo) + 0.5} width={1.35} rotation={routeRotation(hospital, wonokromo)} />
+
+      <RedBridge position={bridge} rotation={canalRotation} />
+      <PortWarehouse position={offsetPosition(port, -2.8, 0, 0.55)} rotation={-0.18} scale={0.95} />
+      <PortWarehouse position={offsetPosition(port, 2.7, 0, 0.55)} rotation={0.12} scale={0.88} />
+      <Dock position={offsetPosition(port, 0.05, 0.09, -1.65)} rotation={0.06} length={4.35} />
+      <Dock position={offsetPosition(internatio, -1.35, 0.09, -0.72)} rotation={canalRotation + Math.PI / 2} length={2.7} />
+      <Boat position={offsetPosition(port, 1.18, 0.1, -3.45)} color="#bd9a58" rotation={0.08} scale={0.76} variant="skiff" />
+      <Boat position={offsetPosition(offshore, -0.58, 0.1, 0.78)} color="#6d7d84" rotation={-0.1} scale={0.75} variant="warship" />
+
+      <SurabayaShophouse position={offsetPosition(bridge, -3.45, 0, 2.18)} rotation={0.12} wall="#b48a62" awning="#a94a3e" />
+      <SurabayaShophouse position={offsetPosition(bridge, 3.8, 0, -2.4)} rotation={-0.2} wall="#c09b70" awning="#466d78" />
+      <SurabayaShophouse position={offsetPosition(internatio, -1.55, 0, 1.75)} rotation={0.35} scale={1.12} wall="#c0a17b" awning="#59756f" />
+      <RadioStation position={radio} rotation={0.2} />
+      <ReliefPost position={hospital} />
+      <Tent position={offsetPosition(tkrCommand, -1.48, 0.02, 0.32)} color="#b19d78" rotation={-0.24} scale={0.78} />
+      <Tent position={offsetPosition(tkrCommand, 1.52, 0.02, -0.78)} color="#7d8971" rotation={0.18} scale={0.7} />
+
+      {([
+        [-2.1, 0, -0.8], [0, 0, -2], [2, 0, -0.7], [-1, 0, 1.25], [1.2, 0, 1.25],
+      ] as Vector3Tuple[]).map((offset, index) => (
+        <KampungHouse key={`kampung-house-${index}`} position={offsetPosition(kampung, offset[0], offset[1], offset[2])} rotation={index * 0.73} scale={0.9 + (index % 2) * 0.08} wall={index % 2 ? "#b29068" : "#9f8565"} />
+      ))}
+      {([
+        [-13.8, 0, 8.1], [-11.2, 0, 8.8], [-9.5, 0, 9.5], [-7, 0, 9], [-4.2, 0, 9.7],
+        [0.8, 0, 9.1], [4.1, 0, 8.9], [7.8, 0, 9.7], [11.8, 0, 8.6], [14.4, 0, 7.2],
+        [-15.2, 0, -7.7], [-12.1, 0, -9.1], [14.9, 0, -9.2], [16.2, 0, -5.8],
+      ] as Vector3Tuple[]).map((position, index) => (
+        <PalmTree key={`surabaya-palm-${index}`} position={position} scale={0.82 + (index % 3) * 0.12} />
+      ))}
+      <ContactShadows position={[0, -0.115, 0]} opacity={0.31} scale={45} blur={2.8} far={10} color="#475044" />
+    </>
+  );
+}
+
+function SurabayaSceneSequence({
+  action,
+  locations,
+}: {
+  action: Exclude<WorldActionCue, "fire-attack">;
+  locations: readonly ScenarioLocation[];
+}) {
+  const bridge = sceneLocationPosition(locations, ["red-bridge", "jembatan-merah"], [0, 0, 0]);
+  const radio = sceneLocationPosition(locations, ["radio-studio", "radio-station"], [-5.7, 0, 2.4]);
+  const hospital = sceneLocationPosition(locations, ["hospital-relief-corridor", "aid-post"], [-1.7, 0, -4.3]);
+  const wonokromo = sceneLocationPosition(locations, ["wonokromo-evacuation-route", "south-evacuation-road"], [-9.8, 0, -7.2]);
+  const internatio = sceneLocationPosition(locations, ["gedung-internatio", "kalimas-warehouses", "kalimas-warehouse"], [1.6, 0, 1.5]);
+
+  if (action === "radio-broadcast") return <RadioSignal position={radio} />;
+  if (action === "ceasefire") return <CeasefireMarker position={bridge} />;
+  if (action === "aid-corridor" || action === "withdrawal") return <AidRouteMarkers from={hospital} to={wonokromo} />;
+  if (action === "urban-assault") {
+    return <UrbanBattleSequence bridge={bridge} internatio={internatio} hospital={hospital} wonokromo={wonokromo} />;
+  }
+
+  return null;
+}
+
 function Scenery({ weather, fireAttackActive }: { weather: WeatherState; fireAttackActive: boolean }) {
   const skyColor = weather.condition === "clear" ? "#a9cedd" : "#aabfc6";
   const sunPosition: Vector3Tuple = weather.condition === "clear" ? [-12, 11, 6] : [-8, 7, 5];
@@ -1731,14 +2667,37 @@ function SceneContent({
   activeEvent,
   onSelectAgent,
 }: WorldSceneProps) {
-  const locationPositions = useMemo(
-    () => new Map(locations.map((location) => [location.id, location.position])),
-    [locations],
+  const navigationObstacles = useMemo(
+    () => sceneObstacles(sceneTheme, locations),
+    [locations, sceneTheme],
   );
+  const agentSlots = useMemo(() => {
+    const byLocation = new Map<string, AgentRuntimeState[]>();
+    agents.forEach((agent) => {
+      if (agent.renderVisible === false) return;
+      const group = byLocation.get(agent.currentLocationId) ?? [];
+      group.push(agent);
+      byLocation.set(agent.currentLocationId, group);
+    });
+
+    const slots = new Map<string, AgentSlot>();
+    byLocation.forEach((group) => {
+      group.forEach((agent, index) => slots.set(agent.id, { index, count: group.length }));
+    });
+    return slots;
+  }, [agents]);
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0];
-  const selectedLocation = selectedAgent ? locationPositions.get(selectedAgent.currentLocationId) : undefined;
-  const target: Vector3Tuple = selectedLocation
-    ? [selectedLocation.x, selectedLocation.y, selectedLocation.z]
+  const selectedLocation = selectedAgent
+    ? locations.find((location) => location.id === selectedAgent.currentLocationId)
+    : undefined;
+  const target: Vector3Tuple = selectedAgent
+    ? markerPositionForAgent(
+      sceneTheme,
+      selectedAgent,
+      selectedLocation,
+      agentSlots.get(selectedAgent.id),
+      navigationObstacles,
+    )
     : [0, 0, 0];
   const messagesBySpeaker = useMemo(
     () => new Map(speechBubbles.slice(0, 2).map((message) => [message.speakerId, message])),
@@ -1753,10 +2712,16 @@ function SceneContent({
     sceneTheme === "waterloo" && activeEvent?.action && activeEvent.action !== "fire-attack"
       ? activeEvent.action
       : undefined;
+  const surabayaAction: Exclude<WorldActionCue, "fire-attack"> | undefined =
+    sceneTheme === "surabaya" && activeEvent?.action && activeEvent.action !== "fire-attack"
+      ? activeEvent.action
+      : undefined;
 
   return (
     <>
-      {sceneTheme === "waterloo" ? (
+      {sceneTheme === "surabaya" ? (
+        <SurabayaScenery weather={weather} locations={locations} />
+      ) : sceneTheme === "waterloo" ? (
         <WaterlooScenery weather={weather} activeAction={waterlooAction} />
       ) : (
         <Scenery weather={weather} fireAttackActive={fireAttackActive} />
@@ -1769,20 +2734,30 @@ function SceneContent({
           eventId={activeEvent?.id}
         />
       )}
+      {surabayaAction && (
+        <SurabayaSceneSequence
+          key={activeEvent?.id ?? surabayaAction}
+          action={surabayaAction}
+          locations={locations}
+        />
+      )}
       <FollowCamera target={target} enabled={followSelected} />
-      {agents.map((agent, index) => {
-        const location = locationPositions.get(agent.currentLocationId);
-        const offset = offsets[index % offsets.length];
-        // Cao Cao's marker sits on the raised deck only in the Red Cliffs scene.
-        const surfaceHeight = sceneTheme === "red-cliffs" && agent.id === "cao-cao" ? 0.79 : location?.y ?? 0;
-        const position: Vector3Tuple = location
-          ? [location.x + offset[0], surfaceHeight, location.z + offset[2]]
-          : [0, 0, 0];
+      {agents.map((agent) => {
+        if (agent.renderVisible === false) return null;
+        const location = locations.find((candidate) => candidate.id === agent.currentLocationId);
+        const position = markerPositionForAgent(
+          sceneTheme,
+          agent,
+          location,
+          agentSlots.get(agent.id),
+          navigationObstacles,
+        );
         return (
           <AgentMarker
             key={agent.id}
             agent={agent}
             position={position}
+            navigationObstacles={navigationObstacles}
             selected={agent.id === selectedAgentId}
             message={messagesBySpeaker.get(agent.id)}
             recipientName={messagesBySpeaker.get(agent.id)?.recipientId ? agentNames.get(messagesBySpeaker.get(agent.id)?.recipientId ?? "") : undefined}

@@ -77,6 +77,7 @@ const runtimeAgentFromScenario = (agent: ScenarioAgent): AgentRuntimeState => ({
   knowledge: agent.initialKnowledge.map((knowledge) => ({ ...knowledge })),
   memory: agent.initialMemory.map((memory) => ({ ...memory })),
   status: "active",
+  renderVisible: true,
 });
 
 const cloneRuntimeAgent = (agent: AgentRuntimeState): AgentRuntimeState => ({
@@ -442,6 +443,11 @@ const applyTimelineEffect = (state: SimulationState, effect: TimelineEffect): Si
       return withUpdatedAgent(state, effect.agentId, (agent) => ({
         ...agent,
         emotionalState: { ...effect.emotion, intensity: clamp(effect.emotion.intensity) },
+      }));
+    case "set-agent-visibility":
+      return withUpdatedAgent(state, effect.agentId, (agent) => ({
+        ...agent,
+        renderVisible: effect.visible,
       }));
     case "share-knowledge":
       return withUpdatedAgent(state, effect.agentId, (agent) => ({
