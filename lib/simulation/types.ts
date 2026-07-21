@@ -51,7 +51,7 @@ export type WindDirection =
   | "variable";
 
 export type InfrastructureStatus = "intact" | "strained" | "damaged" | "collapsed";
-export type WorldSceneTheme = "red-cliffs" | "waterloo" | "surabaya" | "jerusalem";
+export type WorldSceneTheme = "red-cliffs" | "waterloo" | "surabaya" | "jerusalem" | "montgisard";
 export type EventKind =
   | "diplomacy"
   | "logistics"
@@ -80,7 +80,12 @@ export type WorldActionCue =
   | "siege-engine-build"
   | "siege-assault"
   | "siege-parley"
-  | "siege-aftermath";
+  | "siege-aftermath"
+  | "montgisard-march"
+  | "montgisard-scouting"
+  | "montgisard-charge"
+  | "montgisard-rally"
+  | "montgisard-withdrawal";
 export type EvidenceKind = "historical-fact" | "historical-inference" | "speculation";
 export type SimulationStatus = "ready" | "running" | "paused" | "complete";
 export type SimulationPhase = "dawn" | "morning" | "afternoon" | "dusk" | "night";

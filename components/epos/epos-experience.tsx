@@ -149,6 +149,17 @@ function getSceneAmbienceCue(
     return "jerusalem-aftermath";
   }
 
+  if (sceneTheme === "montgisard") {
+    if (tick <= 1) return "montgisard-dry-road";
+    if (tick === 2) return "montgisard-scout-line";
+    if (tick === 3 || tick === 4) return "montgisard-field-tension";
+    if (tick === 5) return "montgisard-charge-field";
+    if (tick === 6) return "montgisard-rally";
+    if (tick === 7) return "montgisard-withdrawal";
+
+    return "montgisard-aftermath";
+  }
+
   return undefined;
 }
 

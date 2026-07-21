@@ -69,6 +69,64 @@ function stableVariant(value: string, length: number) {
   return Array.from(value).reduce((total, character) => total + character.charCodeAt(0), 0) % length;
 }
 
+function isMontgisardCommandLeader(sceneTheme: WorldSceneTheme, agent: AgentRuntimeState) {
+  return sceneTheme === "montgisard" && (agent.id === "baldwin-iv" || agent.id === "saladin");
+}
+
+function montgisardCommandPosition(
+  location: ScenarioLocation,
+  agent: AgentRuntimeState,
+): Vector3Tuple | undefined {
+  const base: Vector3Tuple = [location.position.x, location.position.y, location.position.z];
+
+  // These are authored visual marks, not assertions about an exact medieval
+  // formation. They keep each named commander visibly ahead of their line.
+  if (agent.id === "baldwin-iv") {
+    if (location.id === "montgisard-field") return [base[0] - 2.5, base[1], base[2] - 0.8];
+    if (location.id === "frankish-cavalry-line") return [base[0] + 1.58, base[1], base[2] + 0.27];
+  }
+
+  if (agent.id === "saladin") {
+    if (location.id === "ayyubid-deployment") return [base[0] - 1.58, base[1], base[2] - 0.27];
+    if (location.id === "montgisard-field") return [base[0] + 2.12, base[1], base[2] + 0.38];
+  }
+
+  return undefined;
+}
+
+function sceneAgentIdleFacing(
+  sceneTheme: WorldSceneTheme,
+  location: ScenarioLocation | undefined,
+  agent: AgentRuntimeState,
+) {
+  if (sceneTheme !== "montgisard" || !location) return undefined;
+
+  if (
+    agent.factionId === "sun-liu" &&
+    (location.id === "montgisard-field" || location.id === "frankish-cavalry-line")
+  ) {
+    return Math.PI / 2;
+  }
+
+  if (
+    agent.factionId === "wei" &&
+    (location.id === "montgisard-field" || location.id === "ayyubid-deployment")
+  ) {
+    return -Math.PI / 2;
+  }
+
+  return undefined;
+}
+
+function sceneAgentPalette(sceneTheme: WorldSceneTheme, agent: AgentRuntimeState) {
+  if (sceneTheme !== "montgisard") return undefined;
+
+  if (agent.factionId === "sun-liu") return { color: "#d8cfaa", trim: "#644632" };
+  if (agent.factionId === "wei") return { color: "#b95447", trim: "#6c3632" };
+
+  return { color: "#b79b62", trim: "#70573d" };
+}
+
 function Headwear({ role, color, trim }: { role: AgentRuntimeState["role"]; color: string; trim: string }) {
   if (role === "ruler") {
     return (
@@ -303,6 +361,15 @@ function sceneAgentAnchor(
       : [base[0] + 0.05, base[1], base[2] - 1.28];
   }
 
+  // At Montgisard the two formations deliberately occupy opposite edges of
+  // the modeled contact field. This keeps the teaching view readable and
+  // prevents the historical agents from visually clipping through one another.
+  if (sceneTheme === "montgisard" && location.id === "montgisard-field") {
+    return agent.factionId === "wei"
+      ? [base[0] + 1.16, base[1], base[2] + 0.52]
+      : [base[0] - 1.16, base[1], base[2] - 0.68];
+  }
+
   const sceneOffsets: Partial<Record<WorldSceneTheme, Record<string, Vector3Tuple>>> = {
     "red-cliffs": {
       xiakou: [0.1, 0, -1.72],
@@ -355,6 +422,19 @@ function sceneAgentAnchor(
       "parley-ground": [0.1, 0, -0.5],
       "departure-road": [0.52, 0, 0.35],
     },
+    montgisard: {
+      "ascalon-road-approach": [0.22, 0, 0.48],
+      "frankish-rally": [0.16, 0, 1.42],
+      "frankish-cavalry-line": [-0.38, 0, -0.86],
+      "montgisard-tell": [-1.7, 0, -1.25],
+      "ayyubid-deployment": [0.94, 0, -0.78],
+      "ayyubid-baggage-column": [-1.36, 0, -1.28],
+      "wadi-crossing": [0.14, 0, 0.62],
+      "ramla-road": [0.45, 0, -0.22],
+      "southern-withdrawal-road": [0.36, 0, 0.32],
+      "roadside-farmstead": [-1.36, 0, -0.82],
+      "water-point": [-1.24, 0, -0.7],
+    },
   };
   const offset = sceneOffsets[sceneTheme]?.[location.id];
   if (offset) return [base[0] + offset[0], base[1] + offset[1], base[2] + offset[2]];
@@ -397,15 +477,20 @@ function markerPositionForAgent(
 ): Vector3Tuple {
   if (!location) return [0, 0, 0];
 
-  const anchor = sceneAgentAnchor(sceneTheme, location, agent);
-  const formation = formationOffset(slot?.index ?? 0, slot?.count ?? 1, agent.renderKind);
+  const commandPosition = isMontgisardCommandLeader(sceneTheme, agent)
+    ? montgisardCommandPosition(location, agent)
+    : undefined;
+  const anchor = commandPosition ?? sceneAgentAnchor(sceneTheme, location, agent);
+  const formation = commandPosition
+    ? [0, 0, 0] as Vector3Tuple
+    : formationOffset(slot?.index ?? 0, slot?.count ?? 1, agent.renderKind);
   const surfaceHeight = sceneTheme === "red-cliffs" && agent.id === "cao-cao" ? 0.79 : anchor[1];
   const desired: Vector3Tuple = [anchor[0] + formation[0], surfaceHeight, anchor[2] + formation[2]];
   return makeAgentPositionSafe(
     desired,
     obstacles,
     agent.id,
-    agent.renderKind === "unit" ? 0.7 : 0.3,
+    agent.renderKind === "unit" ? 0.7 : isMontgisardCommandLeader(sceneTheme, agent) ? 0.55 : 0.3,
   );
 }
 
@@ -587,6 +672,31 @@ function sceneObstacles(sceneTheme: WorldSceneTheme, locations: readonly Scenari
       { id: "wall-south-center", position: [0.45, 0, -3.3], radius: 0.68 },
       { id: "wall-south-east-center", position: [1.82, 0, -3.3], radius: 0.68 },
       { id: "wall-south-east", position: [3.12, 0, -3.3], radius: 0.68 },
+    ];
+  }
+
+  if (sceneTheme === "montgisard") {
+    const rally = sceneLocationPosition(locations, ["frankish-rally"], [-7, 0, -2.4]);
+    const tell = sceneLocationPosition(locations, ["montgisard-tell"], [3.9, 0, 4.8]);
+    const baggage = sceneLocationPosition(locations, ["ayyubid-baggage-column"], [8, 0, -2]);
+    const farmstead = sceneLocationPosition(locations, ["roadside-farmstead"], [-0.8, 0, 4.1]);
+    const waterPoint = sceneLocationPosition(locations, ["water-point"], [-5.2, 0, 3.2]);
+
+    return [
+      { id: "montgisard-tell", position: tell, radius: 2.2 },
+      { id: "montgisard-farmstead", position: farmstead, radius: 1.35 },
+      { id: "montgisard-water-shelter", position: waterPoint, radius: 0.82 },
+      { id: "montgisard-water-well", position: offsetPosition(waterPoint, 0.82, 0, -0.34), radius: 0.52 },
+      { id: "montgisard-baggage", position: baggage, radius: 1.48 },
+      { id: "montgisard-baggage-cart-east", position: offsetPosition(baggage, 1.1, 0, -0.76), radius: 0.62 },
+      { id: "montgisard-baggage-tent-west", position: offsetPosition(baggage, -0.96, 0, 0.62), radius: 0.76 },
+      { id: "montgisard-baggage-tent-east", position: offsetPosition(baggage, 0.42, 0, 1.1), radius: 0.68 },
+      { id: "montgisard-rally-tent-west", position: offsetPosition(rally, -1.22, 0, 0.42), radius: 0.84 },
+      { id: "montgisard-rally-tent-east", position: offsetPosition(rally, 1.18, 0, 0.72), radius: 0.8 },
+      { id: "montgisard-frankish-formation", position: offsetPosition(sceneLocationPosition(locations, ["frankish-cavalry-line"], [-3.3, 0, -0.7]), 0.12, 0, 0.3), radius: 0.9 },
+      { id: "montgisard-ayyubid-formation", position: offsetPosition(sceneLocationPosition(locations, ["ayyubid-deployment"], [5.4, 0, 0.8]), 0.62, 0, 0.42), radius: 0.9 },
+      { id: "montgisard-olive-west", position: [-2.72, 0, 5.92], radius: 0.72 },
+      { id: "montgisard-olive-east", position: [5.45, 0, 6.22], radius: 0.76 },
     ];
   }
 
@@ -1477,6 +1587,87 @@ function UnitFormation({ color, trim }: { color: string; trim: string }) {
   );
 }
 
+function MontgisardCommandHeadwear({ commander, color, trim }: { commander: "baldwin-iv" | "saladin"; color: string; trim: string }) {
+  if (commander === "baldwin-iv") {
+    return (
+      <group position={[0, 1.295, 0]}>
+        <mesh castShadow>
+          <cylinderGeometry args={[0.13, 0.16, 0.12, 6]} />
+          <meshStandardMaterial color={trim} roughness={0.82} flatShading />
+        </mesh>
+        <mesh castShadow position={[0, 0.1, -0.01]}>
+          <coneGeometry args={[0.14, 0.18, 6]} />
+          <meshStandardMaterial color="#8f8a78" roughness={0.72} metalness={0.24} flatShading />
+        </mesh>
+        <mesh castShadow position={[0, 0.03, 0.14]}>
+          <boxGeometry args={[0.21, 0.06, 0.035]} />
+          <meshStandardMaterial color={color} roughness={0.9} />
+        </mesh>
+      </group>
+    );
+  }
+
+  return (
+    <group position={[0, 1.295, 0]}>
+      <mesh castShadow position={[0, 0.01, 0]} scale={[1.08, 0.7, 1.08]}>
+        <sphereGeometry args={[0.17, 8, 6]} />
+        <meshStandardMaterial color="#d8c7a2" roughness={0.93} flatShading />
+      </mesh>
+      <mesh castShadow position={[0, 0.095, 0]} scale={[0.82, 0.44, 0.82]}>
+        <sphereGeometry args={[0.18, 8, 6]} />
+        <meshStandardMaterial color={trim} roughness={0.88} flatShading />
+      </mesh>
+      <mesh castShadow position={[0, 0.13, 0]} scale={[0.58, 0.44, 0.58]}>
+        <sphereGeometry args={[0.18, 8, 6]} />
+        <meshStandardMaterial color="#d8c7a2" roughness={0.93} flatShading />
+      </mesh>
+      <mesh castShadow position={[0.08, -0.02, 0.15]}>
+        <boxGeometry args={[0.11, 0.2, 0.035]} />
+        <meshStandardMaterial color="#b95447" roughness={0.92} />
+      </mesh>
+    </group>
+  );
+}
+
+function CommandHorse({ horseColor, saddleColor }: { horseColor: string; saddleColor: string }) {
+  return (
+    <group position={[0, 0, 0.02]}>
+      <mesh castShadow receiveShadow position={[0, 0.68, 0]} scale={[0.76, 0.82, 1.03]}>
+        <dodecahedronGeometry args={[0.61, 0]} />
+        <meshStandardMaterial color={horseColor} roughness={0.98} flatShading />
+      </mesh>
+      <mesh castShadow position={[0, 0.96, 0.62]} rotation={[-0.26, 0, 0]} scale={[0.58, 0.7, 0.72]}>
+        <dodecahedronGeometry args={[0.35, 0]} />
+        <meshStandardMaterial color={horseColor} roughness={0.98} flatShading />
+      </mesh>
+      <mesh castShadow position={[0, 1.3, 0.9]} scale={[0.68, 0.58, 0.76]}>
+        <dodecahedronGeometry args={[0.26, 0]} />
+        <meshStandardMaterial color={horseColor} roughness={0.98} flatShading />
+      </mesh>
+      {[-0.38, 0.38].flatMap((x) => [-0.34, 0.36].map((z) => [x, z] as const)).map(([x, z]) => (
+        <mesh key={`${x}-${z}`} castShadow position={[x, 0.29, z]}>
+          <cylinderGeometry args={[0.07, 0.09, 0.7, 5]} />
+          <meshStandardMaterial color="#4e392d" roughness={0.99} />
+        </mesh>
+      ))}
+      <mesh castShadow position={[0, 1.03, -0.1]}>
+        <boxGeometry args={[0.62, 0.11, 0.62]} />
+        <meshStandardMaterial color={saddleColor} roughness={0.96} />
+      </mesh>
+      <mesh castShadow position={[0, 0.89, -0.72]} rotation={[0.72, 0, 0]}>
+        <coneGeometry args={[0.12, 0.56, 5]} />
+        <meshStandardMaterial color={horseColor} roughness={0.98} flatShading />
+      </mesh>
+      {[-0.12, 0.12].map((x) => (
+        <mesh key={x} castShadow position={[x, 1.5, 1.04]} rotation={[0.15, 0, x > 0 ? 0.24 : -0.24]}>
+          <coneGeometry args={[0.04, 0.17, 4]} />
+          <meshStandardMaterial color="#4e392d" roughness={0.99} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 function AgentMarker({
   agent,
   position,
@@ -1485,6 +1676,9 @@ function AgentMarker({
   message,
   recipientName,
   factionColor,
+  factionTrim,
+  idleFacing,
+  commandMounted = false,
   onSelect,
 }: {
   agent: AgentRuntimeState;
@@ -1494,6 +1688,11 @@ function AgentMarker({
   message?: AgentMessage;
   recipientName?: string;
   factionColor?: string;
+  factionTrim?: string;
+  /** A scene-authored orientation used only once a marker reaches its target. */
+  idleFacing?: number;
+  /** Keeps named commanders selectable while presenting them on horseback. */
+  commandMounted?: boolean;
   onSelect: (agentId: string) => void;
 }) {
   const [targetX, targetY, targetZ] = position;
@@ -1518,10 +1717,11 @@ function AgentMarker({
   });
   const travelDirection = useMemo(() => new THREE.Vector3(), []);
   const color = factionColor ?? factionColors[agent.factionId] ?? factionColors.neutral;
-  const trim = factionTrimColors[agent.factionId] ?? factionTrimColors.neutral;
+  const trim = factionTrim ?? factionTrimColors[agent.factionId] ?? factionTrimColors.neutral;
   const skin = skinTones[stableVariant(agent.id, skinTones.length)];
   const hair = hairColors[stableVariant(`${agent.id}-hair`, hairColors.length)];
-  const bodyClearance = agent.renderKind === "unit" ? 0.7 : 0.3;
+  const bodyClearance = agent.renderKind === "unit" ? 0.7 : commandMounted ? 0.55 : 0.3;
+  const mountedFigureHeight = commandMounted ? 0.64 : 0;
 
   useEffect(() => {
     const animation = motion.current;
@@ -1581,12 +1781,12 @@ function AgentMarker({
         group.current.rotation.y = THREE.MathUtils.damp(group.current.rotation.y, facing, 9, delta);
       }
     } else {
-      const idleFacing = Math.sin(clock.elapsedTime * 0.42 + targetX) * 0.035;
-      group.current.rotation.y = THREE.MathUtils.damp(group.current.rotation.y, idleFacing, 2, delta);
+      const gentleLook = Math.sin(clock.elapsedTime * 0.42 + targetX) * 0.035;
+      group.current.rotation.y = THREE.MathUtils.damp(group.current.rotation.y, (idleFacing ?? 0) + gentleLook, 2, delta);
     }
 
     if (figure.current) {
-      figure.current.position.y = rest + (isWalking ? Math.abs(step) * 0.045 : 0);
+      figure.current.position.y = mountedFigureHeight + rest + (isWalking ? Math.abs(step) * 0.045 : 0);
       figure.current.rotation.z = isWalking ? step * 0.055 : 0;
     }
 
@@ -1617,20 +1817,27 @@ function AgentMarker({
     <group ref={group} position={position} onClick={select}>
       {selected && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, 0]}>
-          <ringGeometry args={[0.33, 0.41, 32]} />
+          <ringGeometry args={commandMounted ? [0.54, 0.66, 32] : [0.33, 0.41, 32]} />
           <meshBasicMaterial color="#f2c75c" transparent opacity={0.93} side={THREE.DoubleSide} />
         </mesh>
       )}
       {agent.renderKind === "unit" ? (
         <UnitFormation color={color} trim={trim} />
       ) : (
+      <>
+        {commandMounted && (
+          <CommandHorse
+            horseColor={agent.id === "saladin" ? "#49372e" : "#765a43"}
+            saddleColor={agent.id === "saladin" ? "#6c3632" : "#644632"}
+          />
+        )}
       <group ref={figure}>
         <mesh castShadow position={[0, 0.72, -0.155]} rotation={[0.08, 0, 0]}>
           <boxGeometry args={[0.36, 0.48, 0.05]} />
           <meshStandardMaterial color={trim} roughness={0.94} />
         </mesh>
 
-        <group ref={leftLeg} position={[-0.105, 0.45, 0]}>
+        {!commandMounted && <group ref={leftLeg} position={[-0.105, 0.45, 0]}>
           <mesh castShadow position={[0, -0.14, 0]}>
             <boxGeometry args={[0.13, 0.31, 0.15]} />
             <meshStandardMaterial color="#3d4650" roughness={0.92} />
@@ -1639,8 +1846,8 @@ function AgentMarker({
             <boxGeometry args={[0.145, 0.085, 0.2]} />
             <meshStandardMaterial color="#292f37" roughness={0.95} />
           </mesh>
-        </group>
-        <group ref={rightLeg} position={[0.105, 0.45, 0]}>
+        </group>}
+        {!commandMounted && <group ref={rightLeg} position={[0.105, 0.45, 0]}>
           <mesh castShadow position={[0, -0.14, 0]}>
             <boxGeometry args={[0.13, 0.31, 0.15]} />
             <meshStandardMaterial color="#3d4650" roughness={0.92} />
@@ -1649,7 +1856,7 @@ function AgentMarker({
             <boxGeometry args={[0.145, 0.085, 0.2]} />
             <meshStandardMaterial color="#292f37" roughness={0.95} />
           </mesh>
-        </group>
+        </group>}
 
         <mesh castShadow position={[0, 0.68, 0]}>
           <cylinderGeometry args={[0.205, 0.275, 0.53, 5]} />
@@ -1711,20 +1918,25 @@ function AgentMarker({
             <meshStandardMaterial color="#a15d52" roughness={0.9} />
           </mesh>
 
-          <Headwear role={agent.role} color={color} trim={trim} />
+          {commandMounted && (agent.id === "baldwin-iv" || agent.id === "saladin") ? (
+            <MontgisardCommandHeadwear commander={agent.id} color={color} trim={trim} />
+          ) : (
+            <Headwear role={agent.role} color={color} trim={trim} />
+          )}
         </group>
         <RoleAccessory role={agent.role} color={color} trim={trim} />
       </group>
+      </>
       )}
       {message && (
-        <Html position={[0, 2.42, 0]} center distanceFactor={10.5} style={{ pointerEvents: "none" }}>
+        <Html position={[0, commandMounted ? 3.35 : 2.42, 0]} center distanceFactor={10.5} style={{ pointerEvents: "none" }}>
           <div className="agent-speech is-speaking" aria-hidden="true">
             <span>{message.text}</span>
             {recipientName && <small>to {recipientName}</small>}
           </div>
         </Html>
       )}
-      <Html position={[0, 1.72, 0]} center distanceFactor={11} style={{ pointerEvents: "none" }}>
+      <Html position={[0, commandMounted ? 2.6 : 1.72, 0]} center distanceFactor={11} style={{ pointerEvents: "none" }}>
         <div className={`agent-label${selected ? " is-selected" : ""}`}>
           <span className="agent-label-dot" style={{ background: color }} />
           {agent.name}
@@ -3283,6 +3495,648 @@ function JerusalemSceneSequence({
   return null;
 }
 
+function LevantFarmstead({ position }: { position: Vector3Tuple }) {
+  return (
+    <group position={position} rotation={[0, -0.18, 0]} scale={[1, 1.28, 1]}>
+      <mesh receiveShadow position={[0, 0.08, 0]}>
+        <boxGeometry args={[2.42, 0.16, 2.02]} />
+        <meshStandardMaterial color="#876d4c" roughness={1} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[-0.28, 0.68, -0.1]}>
+        <boxGeometry args={[1.62, 1.2, 1.36]} />
+        <meshStandardMaterial color="#b59a70" roughness={1} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[-0.28, 1.34, -0.1]}>
+        <boxGeometry args={[1.78, 0.16, 1.52]} />
+        <meshStandardMaterial color="#8c7557" roughness={1} />
+      </mesh>
+      <mesh castShadow position={[-0.28, 0.48, 0.59]}>
+        <boxGeometry args={[0.3, 0.74, 0.04]} />
+        <meshStandardMaterial color="#5f4934" roughness={0.98} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[0.86, 0.48, -0.25]}>
+        <boxGeometry args={[0.58, 0.8, 0.74]} />
+        <meshStandardMaterial color="#a78b63" roughness={1} />
+      </mesh>
+      <mesh castShadow position={[0.86, 1.0, -0.25]} rotation={[0, Math.PI / 4, 0]}>
+        <coneGeometry args={[0.58, 0.44, 4]} />
+        <meshStandardMaterial color="#75583e" roughness={0.98} />
+      </mesh>
+      {[-0.98, 0.98].map((x) => (
+        <mesh key={x} castShadow position={[x, 0.23, 0.75]} scale={[0.8, 1, 0.8]}>
+          <sphereGeometry args={[0.15, 7, 5]} />
+          <meshStandardMaterial color="#9b7049" roughness={0.97} flatShading />
+        </mesh>
+      ))}
+      <mesh castShadow position={[0.28, 0.76, 0.68]}>
+        <boxGeometry args={[0.28, 0.24, 0.03]} />
+        <meshStandardMaterial color="#5f5544" roughness={0.94} />
+      </mesh>
+    </group>
+  );
+}
+
+function MontgisardTell({ position }: { position: Vector3Tuple }) {
+  return (
+    <group position={position}>
+      <mesh receiveShadow position={[0, -0.18, 0]} scale={[2.38, 1.08, 1.92]} rotation={[0.08, 0.22, -0.05]}>
+        <dodecahedronGeometry args={[1.12, 1]} />
+        <meshStandardMaterial color="#9b855d" roughness={1} flatShading />
+      </mesh>
+      {[
+        [-0.78, 0.1, 0.42, 0.48], [0.62, 0.22, -0.26, 0.42], [0.1, 0.4, 0.68, 0.36],
+      ].map(([x, y, z, scale], index) => (
+        <Rock key={index} position={[x, y, z]} scale={scale} color={index % 2 ? "#796646" : "#89734e"} />
+      ))}
+      {[
+        [-0.64, 0.25, -0.54], [0.58, 0.28, 0.4], [0.02, 0.47, -0.12],
+      ].map(([x, y, z], index) => (
+        <mesh key={`tell-scrub-${index}`} castShadow position={[x, y, z]} scale={[0.62, 0.48, 0.62]}>
+          <dodecahedronGeometry args={[0.24, 0]} />
+          <meshStandardMaterial color={index % 2 ? "#6f7044" : "#7c794a"} roughness={1} flatShading />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function WadiCrossing({ position }: { position: Vector3Tuple }) {
+  return (
+    <group position={position} rotation={[0, -0.36, 0]}>
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.104, 0]}>
+        <planeGeometry args={[7.4, 1.55]} />
+        <meshStandardMaterial color="#8d7653" roughness={1} />
+      </mesh>
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.098, 0]}>
+        <planeGeometry args={[6.9, 0.42]} />
+        <meshStandardMaterial color="#726248" roughness={1} />
+      </mesh>
+      {[-2.8, -1.46, 0.08, 1.58, 2.9].map((x, index) => (
+        <Rock key={x} position={[x, -0.02, index % 2 ? 0.54 : -0.54]} scale={0.25 + (index % 3) * 0.05} color="#776546" />
+      ))}
+    </group>
+  );
+}
+
+function RallyStandard({ position, color = "#d8cfaa" }: { position: Vector3Tuple; color?: string }) {
+  const flag = useRef<THREE.Group>(null);
+
+  useFrame(({ clock }) => {
+    if (!flag.current) return;
+    flag.current.rotation.z = Math.sin(clock.elapsedTime * 1.48) * 0.045;
+    flag.current.rotation.y = Math.sin(clock.elapsedTime * 0.78) * 0.07;
+  });
+
+  return (
+    <group ref={flag} position={position}>
+      <mesh castShadow position={[0, 1.22, 0]}>
+        <cylinderGeometry args={[0.035, 0.045, 2.44, 6]} />
+        <meshStandardMaterial color="#624a35" roughness={0.98} />
+      </mesh>
+      <mesh castShadow position={[0.43, 1.84, 0]}>
+        <planeGeometry args={[0.86, 0.58, 2, 1]} />
+        <meshStandardMaterial color={color} side={THREE.DoubleSide} roughness={0.92} />
+      </mesh>
+      <mesh position={[0.43, 1.84, 0.008]}>
+        <boxGeometry args={[0.12, 0.24, 0.012]} />
+        <meshBasicMaterial color="#855d42" />
+      </mesh>
+    </group>
+  );
+}
+
+function BaggageCart({
+  position = [0, 0, 0],
+  rotation = 0,
+  scale = 1,
+}: {
+  position?: Vector3Tuple;
+  rotation?: number;
+  scale?: number;
+}) {
+  return (
+    <group position={position} rotation={[0, rotation, 0]} scale={scale}>
+      <mesh castShadow receiveShadow position={[0, 0.48, 0]}>
+        <boxGeometry args={[0.78, 0.5, 1.25]} />
+        <meshStandardMaterial color="#76523a" roughness={0.98} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[0, 0.82, -0.08]}>
+        <boxGeometry args={[0.9, 0.22, 0.88]} />
+        <meshStandardMaterial color="#9d754d" roughness={0.96} />
+      </mesh>
+      {[-0.48, 0.48].flatMap((z) => [-0.48, 0.48].map((x) => [x, z] as const)).map(([x, z]) => (
+        <mesh key={`${x}-${z}`} castShadow position={[x, 0.25, z]} rotation={[0, Math.PI / 2, 0]}>
+          <torusGeometry args={[0.22, 0.055, 6, 10]} />
+          <meshStandardMaterial color="#4b392c" roughness={0.99} />
+        </mesh>
+      ))}
+      {[-0.18, 0.18].map((x) => (
+        <mesh key={x} castShadow position={[x, 1.1, -0.08]} scale={[0.78, 1.18, 0.78]}>
+          <sphereGeometry args={[0.18, 7, 5]} />
+          <meshStandardMaterial color="#a7794d" roughness={0.96} flatShading />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function MountedRider({
+  position = [0, 0, 0],
+  riderColor = "#d8cfaa",
+  trim = "#6d4937",
+  gallop = false,
+  lance = true,
+}: {
+  position?: Vector3Tuple;
+  riderColor?: string;
+  trim?: string;
+  gallop?: boolean;
+  lance?: boolean;
+}) {
+  const rider = useRef<THREE.Group>(null);
+
+  useFrame(({ clock }) => {
+    if (!rider.current) return;
+    const pace = gallop ? 8.8 : 4.6;
+    const bob = gallop ? 0.065 : 0.028;
+    rider.current.position.y = position[1] + Math.sin(clock.elapsedTime * pace + position[0] * 2.1) * bob;
+    rider.current.rotation.z = gallop ? Math.sin(clock.elapsedTime * pace * 0.5 + position[2]) * 0.03 : 0;
+  });
+
+  return (
+    <group ref={rider} position={position}>
+      <mesh castShadow receiveShadow position={[0, 0.66, 0]} scale={[0.74, 0.78, 1]}>
+        <dodecahedronGeometry args={[0.58, 0]} />
+        <meshStandardMaterial color="#71513d" roughness={0.98} flatShading />
+      </mesh>
+      <mesh castShadow position={[0, 0.86, 0.62]} rotation={[-0.2, 0, 0]} scale={[0.58, 0.68, 0.7]}>
+        <dodecahedronGeometry args={[0.34, 0]} />
+        <meshStandardMaterial color="#765640" roughness={0.98} flatShading />
+      </mesh>
+      {[
+        [-0.38, -0.34], [0.38, -0.34], [-0.38, 0.36], [0.38, 0.36],
+      ].map(([x, z], index) => (
+        <mesh key={`${x}-${z}`} castShadow position={[x, 0.28, z]} rotation={[gallop ? Math.sin(index * 1.7) * 0.18 : 0, 0, 0]}>
+          <cylinderGeometry args={[0.07, 0.09, 0.68, 5]} />
+          <meshStandardMaterial color="#4f392c" roughness={0.99} />
+        </mesh>
+      ))}
+      <mesh castShadow position={[0, 1.23, -0.04]}>
+        <cylinderGeometry args={[0.17, 0.2, 0.58, 6]} />
+        <meshStandardMaterial color={riderColor} roughness={0.92} flatShading />
+      </mesh>
+      <mesh castShadow position={[0, 1.64, -0.04]}>
+        <sphereGeometry args={[0.16, 7, 6]} />
+        <meshStandardMaterial color="#d3a078" roughness={0.95} flatShading />
+      </mesh>
+      <mesh castShadow position={[0, 1.75, -0.04]} scale={[1.05, 0.54, 1]}>
+        <sphereGeometry args={[0.18, 7, 5]} />
+        <meshStandardMaterial color={trim} roughness={0.92} flatShading />
+      </mesh>
+      <mesh castShadow position={[0, 1.05, -0.39]}>
+        <boxGeometry args={[0.64, 0.06, 0.18]} />
+        <meshStandardMaterial color="#4f382b" roughness={0.98} />
+      </mesh>
+      {lance && (
+        <mesh castShadow position={[0.24, 1.44, 0.62]} rotation={[-0.64, 0.18, 0.08]}>
+          <cylinderGeometry args={[0.018, 0.024, 2.35, 5]} />
+          <meshStandardMaterial color="#735136" roughness={0.98} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+function MovingMountedColumn({
+  from,
+  to,
+  count = 1,
+  duration = 8,
+  color = "#d8cfaa",
+  trim = "#6d4937",
+  lance = true,
+}: {
+  from: Vector3Tuple;
+  to: Vector3Tuple;
+  count?: number;
+  duration?: number;
+  color?: string;
+  trim?: string;
+  lance?: boolean;
+}) {
+  const column = useRef<THREE.Group>(null);
+  const startedAt = useRef<number | null>(null);
+
+  useFrame(({ clock }) => {
+    if (!column.current) return;
+    if (startedAt.current === null) startedAt.current = clock.elapsedTime;
+    const elapsed = clock.elapsedTime - startedAt.current;
+    const progress = smoothstep(THREE.MathUtils.clamp(elapsed / duration, 0, 1));
+    const exit = THREE.MathUtils.clamp((elapsed - duration) / 1.55, 0, 1);
+    column.current.visible = exit < 1;
+    column.current.position.set(
+      THREE.MathUtils.lerp(from[0], to[0], progress),
+      THREE.MathUtils.lerp(from[1], to[1], progress),
+      THREE.MathUtils.lerp(from[2], to[2], progress),
+    );
+    column.current.rotation.y = routeRotation(from, to);
+    column.current.scale.setScalar(1 - exit * 0.16);
+  });
+
+  const riderOffsets = Array.from({ length: count }, (_, index) => [
+    ((index % 2) - 0.5) * 0.76,
+    0,
+    -Math.floor(index / 2) * 0.78,
+  ] as Vector3Tuple);
+
+  return (
+    <group ref={column}>
+      {riderOffsets.map((position, index) => (
+        <MountedRider
+          key={index}
+          position={position}
+          riderColor={color}
+          trim={trim}
+          gallop={count > 1}
+          lance={lance}
+        />
+      ))}
+    </group>
+  );
+}
+
+function MovingBaggageColumn({ from, to }: { from: Vector3Tuple; to: Vector3Tuple }) {
+  const column = useRef<THREE.Group>(null);
+  const startedAt = useRef<number | null>(null);
+
+  useFrame(({ clock }) => {
+    if (!column.current) return;
+    if (startedAt.current === null) startedAt.current = clock.elapsedTime;
+    const elapsed = clock.elapsedTime - startedAt.current;
+    const progress = smoothstep(THREE.MathUtils.clamp(elapsed / 13.6, 0, 1));
+    const exit = THREE.MathUtils.clamp((elapsed - 13.6) / 1.8, 0, 1);
+    column.current.visible = exit < 1;
+    column.current.position.set(
+      THREE.MathUtils.lerp(from[0], to[0], progress),
+      THREE.MathUtils.lerp(from[1], to[1], progress),
+      THREE.MathUtils.lerp(from[2], to[2], progress),
+    );
+    column.current.rotation.y = routeRotation(from, to);
+    column.current.scale.setScalar(1 - exit * 0.14);
+  });
+
+  return (
+    <group ref={column}>
+      <BaggageCart position={[0, 0, 0]} />
+      <BaggageCart position={[0.12, 0, -1.55]} scale={0.82} />
+      <MountedRider position={[0.03, 0, 1.22]} riderColor="#a14e43" trim="#6a3633" lance={false} />
+    </group>
+  );
+}
+
+function ModeledFieldFormation({
+  position,
+  color,
+  trim,
+  rotation = 0,
+}: {
+  position: Vector3Tuple;
+  color: string;
+  trim: string;
+  rotation?: number;
+}) {
+  const formation = [
+    [-0.55, -0.36], [0, -0.36], [0.55, -0.36], [-0.55, 0.24], [0, 0.24], [0.55, 0.24],
+  ];
+
+  return (
+    <group position={position} rotation={[0, rotation, 0]} scale={[1.28, 1.3, 1.28]}>
+      {formation.map(([x, z], index) => (
+        <group key={`${x}-${z}`} position={[x, 0, z]}>
+          <mesh castShadow position={[0, 0.35, 0]}>
+            <cylinderGeometry args={[0.085, 0.11, 0.56, 5]} />
+            <meshStandardMaterial color={color} roughness={0.94} flatShading />
+          </mesh>
+          <mesh castShadow position={[0, 0.73, 0]}>
+            <sphereGeometry args={[0.11, 6, 5]} />
+            <meshStandardMaterial color="#d5a078" roughness={0.96} flatShading />
+          </mesh>
+          <mesh castShadow position={[0.16, 0.56, 0.06]} rotation={[0, 0, -0.22]}>
+            <cylinderGeometry args={[0.012, 0.016, 0.72, 5]} />
+            <meshStandardMaterial color={trim} roughness={0.98} />
+          </mesh>
+          {index === 1 && (
+            <mesh castShadow position={[0, 1.22, 0]}>
+              <cylinderGeometry args={[0.018, 0.018, 1.12, 5]} />
+              <meshStandardMaterial color="#624a35" roughness={0.98} />
+            </mesh>
+          )}
+        </group>
+      ))}
+    </group>
+  );
+}
+
+function MontgisardBattleLine({
+  position,
+  facing,
+  color,
+  trim,
+  banner,
+}: {
+  position: Vector3Tuple;
+  facing: number;
+  color: string;
+  trim: string;
+  banner: string;
+}) {
+  const standards = useRef<THREE.Group>(null);
+  const rankLayout = [5, 4, 5];
+
+  useFrame(({ clock }) => {
+    if (!standards.current) return;
+    standards.current.children.forEach((standard, index) => {
+      standard.rotation.z = Math.sin(clock.elapsedTime * 1.55 + index * 1.1) * 0.052;
+      standard.rotation.y = Math.sin(clock.elapsedTime * 0.84 + index) * 0.045;
+    });
+  });
+
+  return (
+    <group position={position} rotation={[0, facing, 0]}>
+      {rankLayout.flatMap((count, row) => Array.from({ length: count }, (_, index) => ({
+        row,
+        index,
+        count,
+      }))).map(({ row, index, count }) => {
+        const x = (index - (count - 1) / 2) * 0.56 + (row % 2 ? 0.28 : 0);
+        const z = -row * 0.62;
+        const soldierHeight = 0.93 + ((index + row) % 3) * 0.035;
+
+        return (
+          <group key={`${row}-${index}`} position={[x, 0, z]} rotation={[0, 0, ((index + row) % 2 ? 0.018 : -0.018)]}>
+            <mesh castShadow position={[0, soldierHeight * 0.52, 0]}>
+              <cylinderGeometry args={[0.13, 0.17, soldierHeight, 5]} />
+              <meshStandardMaterial color={color} roughness={0.94} flatShading />
+            </mesh>
+            <mesh castShadow position={[0, soldierHeight + 0.13, 0]}>
+              <sphereGeometry args={[0.13, 7, 5]} />
+              <meshStandardMaterial color="#d4a079" roughness={0.96} flatShading />
+            </mesh>
+            <mesh castShadow position={[0, soldierHeight + 0.25, -0.015]} scale={[1.05, 0.48, 1]}>
+              <sphereGeometry args={[0.145, 7, 5]} />
+              <meshStandardMaterial color={trim} roughness={0.91} flatShading />
+            </mesh>
+            <mesh castShadow position={[0.02, soldierHeight * 0.56, 0.2]} rotation={[0.06, 0, 0]} scale={[0.76, 1, 0.9]}>
+              <sphereGeometry args={[0.2, 6, 5]} />
+              <meshStandardMaterial color={row === 0 ? trim : "#806349"} roughness={0.96} flatShading />
+            </mesh>
+            <mesh castShadow position={[0.16, soldierHeight * 0.98, 0.08]} rotation={[-0.23, 0, 0.06]}>
+              <cylinderGeometry args={[0.015, 0.019, 1.54, 5]} />
+              <meshStandardMaterial color="#735137" roughness={0.99} />
+            </mesh>
+          </group>
+        );
+      })}
+      <group ref={standards}>
+        {[-1.22, 1.22].map((x, index) => (
+          <group key={x} position={[x, 0, -1.48]}>
+            <mesh castShadow position={[0, 1.23, 0]}>
+              <cylinderGeometry args={[0.024, 0.032, 2.46, 5]} />
+              <meshStandardMaterial color="#624a35" roughness={0.98} />
+            </mesh>
+            <mesh castShadow position={[0.32, 1.76, 0]}>
+              <planeGeometry args={[0.64, 0.46, 2, 1]} />
+              <meshStandardMaterial color={index ? color : banner} side={THREE.DoubleSide} roughness={0.91} />
+            </mesh>
+          </group>
+        ))}
+      </group>
+      <MountedRider position={[-1.15, 0, -2.28]} riderColor={color} trim={trim} lance />
+      <MountedRider position={[1.15, 0, -2.28]} riderColor={color} trim={trim} lance />
+    </group>
+  );
+}
+
+function MontgisardScenery({
+  weather,
+  locations,
+  activeAction,
+  activeEventId,
+}: {
+  weather: WeatherState;
+  locations: readonly ScenarioLocation[];
+  activeAction?: Exclude<WorldActionCue, "fire-attack">;
+  activeEventId?: string;
+}) {
+  const hazy = weather.condition === "overcast" || weather.condition === "fog";
+  const skyColor = hazy ? "#d4c6a9" : "#e4c993";
+  const sunPosition: Vector3Tuple = hazy ? [-10, 8, 6] : [-11, 12, 8];
+  const approach = sceneLocationPosition(locations, ["ascalon-road-approach"], [-12, 0, -5]);
+  const rally = sceneLocationPosition(locations, ["frankish-rally"], [-7, 0, -2.4]);
+  const cavalry = sceneLocationPosition(locations, ["frankish-cavalry-line"], [-3.3, 0, -0.7]);
+  const tell = sceneLocationPosition(locations, ["montgisard-tell"], [3.9, 0, 4.8]);
+  const deployment = sceneLocationPosition(locations, ["ayyubid-deployment"], [5.4, 0, 0.8]);
+  const baggage = sceneLocationPosition(locations, ["ayyubid-baggage-column"], [8, 0, -2]);
+  const wadi = sceneLocationPosition(locations, ["wadi-crossing"], [6.3, 0, -4]);
+  const ramlaRoad = sceneLocationPosition(locations, ["ramla-road"], [11.7, 0, 3.8]);
+  const withdrawal = sceneLocationPosition(locations, ["southern-withdrawal-road"], [12.2, 0, -7.2]);
+  const farmstead = sceneLocationPosition(locations, ["roadside-farmstead"], [-0.8, 0, 4.1]);
+  const waterPoint = sceneLocationPosition(locations, ["water-point"], [-5.2, 0, 3.2]);
+  const showBattleTableau = activeEventId === "battle-of-montgisard" || activeAction === "montgisard-charge";
+  const showRallyStandard = activeAction !== "montgisard-rally";
+  const showBaggageCarts = activeAction !== "montgisard-withdrawal";
+  const showFrankishFormation =
+    !showBattleTableau &&
+    activeAction !== "montgisard-rally" &&
+    activeEventId !== "frankish-force-reaches-field-line";
+  const showAyyubidFormation =
+    !showBattleTableau &&
+    activeEventId !== "ayyubid-campaign-enters-corridor";
+
+  return (
+    <>
+      <Sky distance={450000} sunPosition={sunPosition} turbidity={hazy ? 13 : 8} rayleigh={hazy ? 0.44 : 0.86} mieCoefficient={0.009} mieDirectionalG={0.76} />
+      <fog attach="fog" args={[skyColor, 22, 53]} />
+      <hemisphereLight args={["#f1dfb9", "#756245", 1.95]} />
+      <directionalLight castShadow position={sunPosition} intensity={hazy ? 1.55 : 2.3} color="#ffe5ad" shadow-mapSize-width={1536} shadow-mapSize-height={1536} shadow-bias={-0.00016} />
+      <directionalLight position={[10, 7, -9]} intensity={0.28} color="#c7b58e" />
+
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.15, 0]}>
+        <planeGeometry args={[49, 35]} />
+        <meshStandardMaterial color={hazy ? "#aa966c" : "#b9a26e"} roughness={1} />
+      </mesh>
+      <TerrainPatch position={[-11.2, -0.13, 5.8]} scale={[6.4, 3.9, 1]} color="#a58f61" rotation={0.16} />
+      <TerrainPatch position={[10.8, -0.13, 5.9]} scale={[6.7, 3.8, 1]} color="#ad9664" rotation={-0.2} />
+      <TerrainPatch position={[10.6, -0.13, -7.3]} scale={[6.5, 3.9, 1]} color="#99845a" rotation={0.18} />
+      <TerrainPatch position={[-11.1, -0.13, -7.4]} scale={[6.2, 3.8, 1]} color="#ad9668" rotation={-0.14} />
+
+      <StoneRoad position={routeMidpoint(approach, rally)} length={routeLength(approach, rally) + 0.8} width={1.38} rotation={routeRotation(approach, rally)} />
+      <StoneRoad position={routeMidpoint(rally, cavalry)} length={routeLength(rally, cavalry) + 0.42} width={1.28} rotation={routeRotation(rally, cavalry)} />
+      <StoneRoad position={routeMidpoint(deployment, ramlaRoad)} length={routeLength(deployment, ramlaRoad) + 0.45} width={1.12} rotation={routeRotation(deployment, ramlaRoad)} />
+      <StoneRoad position={routeMidpoint(baggage, withdrawal)} length={routeLength(baggage, withdrawal) + 0.7} width={1.28} rotation={routeRotation(baggage, withdrawal)} />
+      <StoneRoad position={routeMidpoint(waterPoint, farmstead)} length={routeLength(waterPoint, farmstead) + 0.32} width={0.86} rotation={routeRotation(waterPoint, farmstead)} />
+
+      <MontgisardTell position={tell} />
+      <WadiCrossing position={wadi} />
+      <LevantFarmstead position={farmstead} />
+      <Tent position={waterPoint} color="#c5b17c" rotation={0.16} scale={0.66} />
+      <mesh receiveShadow position={offsetPosition(waterPoint, 0.82, 0.07, -0.34)}>
+        <cylinderGeometry args={[0.46, 0.52, 0.14, 12]} />
+        <meshStandardMaterial color="#8f7558" roughness={1} />
+      </mesh>
+      <mesh position={offsetPosition(waterPoint, 0.82, 0.15, -0.34)} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.35, 12]} />
+        <meshStandardMaterial color="#537f86" roughness={0.54} metalness={0.1} />
+      </mesh>
+
+      <Tent position={offsetPosition(rally, -1.22, 0.02, 0.42)} color="#d1c091" rotation={-0.24} scale={0.84} />
+      <Tent position={offsetPosition(rally, 1.18, 0.02, 0.72)} color="#b9a87c" rotation={0.2} scale={0.8} />
+      <Campfire position={offsetPosition(rally, -0.14, 0.08, -1.15)} />
+      {showRallyStandard && <RallyStandard position={offsetPosition(rally, 0.18, 0, -0.18)} />}
+      {showBaggageCarts && <BaggageCart position={baggage} rotation={-0.16} />}
+      {showBaggageCarts && <BaggageCart position={offsetPosition(baggage, 1.1, 0, -0.76)} rotation={-0.16} scale={0.82} />}
+      <Tent position={offsetPosition(baggage, -0.96, 0.02, 0.62)} color="#a54f42" rotation={0.18} scale={0.76} />
+      <Tent position={offsetPosition(baggage, 0.42, 0.02, 1.1)} color="#bf7452" rotation={-0.14} scale={0.68} />
+
+      {showFrankishFormation && <ModeledFieldFormation position={offsetPosition(cavalry, 0.12, 0, 0.3)} color="#d7cfaa" trim="#644632" rotation={routeRotation(cavalry, deployment)} />}
+      {showAyyubidFormation && <ModeledFieldFormation position={offsetPosition(deployment, 0.62, 0, 0.42)} color="#b95447" trim="#6c3632" rotation={routeRotation(deployment, cavalry)} />}
+      {showBattleTableau && (
+        <>
+          <MontgisardBattleLine
+            position={offsetPosition(cavalry, 0.12, 0, 0.3)}
+            facing={routeRotation(cavalry, deployment)}
+            color="#d8cfaa"
+            trim="#644632"
+            banner="#e4d7b2"
+          />
+          <MontgisardBattleLine
+            position={offsetPosition(deployment, 0.62, 0, 0.42)}
+            facing={routeRotation(deployment, cavalry)}
+            color="#b95447"
+            trim="#6c3632"
+            banner="#c79c52"
+          />
+        </>
+      )}
+
+      {([
+        [-14.7, 0, 6.9], [-12.4, 0, 8.4], [-9.4, 0, 6.8], [-6.9, 0, 8.2], [-3.7, 0, 7.3],
+        [-2.72, 0, 5.92], [5.45, 0, 6.22], [7.2, 0, 8.1], [9.8, 0, 7.2], [12.6, 0, 8.5], [14.8, 0, 6.7], [-15.2, 0, -6.6],
+        [-12.5, 0, -8.5], [-9.8, 0, -7.7], [10.8, 0, -8.8], [14.5, 0, -6.7],
+      ] as Vector3Tuple[]).map((position, index) => (
+        <OliveTree key={`montgisard-olive-${index}`} position={position} scale={0.76 + (index % 3) * 0.12} />
+      ))}
+      {([
+        [-15.2, 2.25, -10.3], [-9.6, 2.55, -11.6], [-2.7, 2.15, -11.1], [5.6, 2.45, -10.8],
+        [13.6, 2.32, -9.8], [-14.8, 2.4, 10.7], [-6.1, 2.12, 12.0], [4.5, 2.42, 11.8], [14.8, 2.28, 9.9],
+      ] as Vector3Tuple[]).map((position, index) => (
+        <Mountain key={`montgisard-horizon-${index}`} position={position} scale={3.45 + (index % 3) * 0.58} color={index % 2 ? "#907a56" : "#9f895f"} />
+      ))}
+      <ContactShadows position={[0, -0.115, 0]} opacity={0.33} scale={47} blur={2.7} far={10} color="#66533d" />
+    </>
+  );
+}
+
+function MontgisardSceneSequence({
+  action,
+  eventId,
+  locations,
+}: {
+  action: Exclude<WorldActionCue, "fire-attack">;
+  eventId?: string;
+  locations: readonly ScenarioLocation[];
+}) {
+  const approach = sceneLocationPosition(locations, ["ascalon-road-approach"], [-12, 0, -5]);
+  const rally = sceneLocationPosition(locations, ["frankish-rally"], [-7, 0, -2.4]);
+  const cavalry = sceneLocationPosition(locations, ["frankish-cavalry-line"], [-3.3, 0, -0.7]);
+  const field = sceneLocationPosition(locations, ["montgisard-field"], [0.6, 0, 0.45]);
+  const deployment = sceneLocationPosition(locations, ["ayyubid-deployment"], [5.4, 0, 0.8]);
+  const baggage = sceneLocationPosition(locations, ["ayyubid-baggage-column"], [8, 0, -2]);
+  const wadi = sceneLocationPosition(locations, ["wadi-crossing"], [6.3, 0, -4]);
+  const ramlaRoad = sceneLocationPosition(locations, ["ramla-road"], [11.7, 0, 3.8]);
+  const withdrawal = sceneLocationPosition(locations, ["southern-withdrawal-road"], [12.2, 0, -7.2]);
+  const waterPoint = sceneLocationPosition(locations, ["water-point"], [-5.2, 0, 3.2]);
+  const farmstead = sceneLocationPosition(locations, ["roadside-farmstead"], [-0.8, 0, 4.1]);
+
+  if (action === "montgisard-march") {
+    if (eventId === "ayyubid-campaign-enters-corridor") {
+      return (
+        <group>
+          <MovingMountedColumn from={ramlaRoad} to={offsetPosition(deployment, 1.42, 0, -0.82)} count={2} duration={12.4} color="#b95447" trim="#6c3632" />
+          <AidRouteMarkers from={ramlaRoad} to={deployment} count={5} color="#d6a96e" />
+        </group>
+      );
+    }
+
+    if (eventId === "frankish-force-reaches-field-line") {
+      return (
+        <group>
+          <MovingMountedColumn from={rally} to={cavalry} count={3} duration={11.6} color="#d8cfaa" trim="#644632" />
+          <AidRouteMarkers from={rally} to={cavalry} count={5} color="#d8cfaa" />
+        </group>
+      );
+    }
+
+    return (
+      <group>
+        <MovingMountedColumn from={approach} to={rally} count={2} duration={12.4} color="#d8cfaa" trim="#644632" />
+        <AidRouteMarkers from={approach} to={rally} count={5} color="#d5b970" />
+      </group>
+    );
+  }
+
+  if (action === "montgisard-scouting") {
+    if (eventId === "campaign-routes-stretch-across-field") {
+      return (
+        <group>
+          <MovingMountedColumn from={offsetPosition(baggage, -1.36, 0, -1.18)} to={wadi} duration={10.2} color="#b95447" trim="#6c3632" lance={false} />
+          <AidRouteMarkers from={baggage} to={wadi} count={4} color="#d6a96e" />
+        </group>
+      );
+    }
+
+    return (
+        <group>
+        <MovingMountedColumn from={approach} to={offsetPosition(rally, -0.9, 0, -0.76)} duration={8.8} color="#d8cfaa" trim="#644632" lance={false} />
+        <FiniteSiegeDustBurst position={offsetPosition(rally, -0.52, 0.03, -0.72)} delay={5.7} scale={0.36} />
+      </group>
+    );
+  }
+
+  if (action === "montgisard-rally") {
+    return (
+      <group>
+        <RallyStandard position={offsetPosition(rally, 0.18, 0, -0.18)} color="#d8cfaa" />
+        <MovingMountedColumn from={rally} to={cavalry} count={3} duration={10.8} color="#d8cfaa" trim="#644632" />
+        <AidRouteMarkers from={rally} to={cavalry} count={5} color="#d8cfaa" />
+      </group>
+    );
+  }
+
+  if (action === "montgisard-charge") {
+    return (
+      <group>
+        <MovingMountedColumn from={cavalry} to={deployment} count={5} duration={11.8} color="#d8cfaa" trim="#644632" />
+        <FiniteSiegeDustBurst position={offsetPosition(field, -0.42, 0.04, -0.32)} delay={2.8} scale={0.62} />
+        <FiniteSiegeDustBurst position={offsetPosition(field, 1.3, 0.04, 0.12)} delay={5.2} scale={0.76} />
+        <FiniteSiegeDustBurst position={offsetPosition(deployment, -0.48, 0.04, -0.26)} delay={8.3} scale={0.88} />
+      </group>
+    );
+  }
+
+  if (action === "montgisard-withdrawal") {
+    return (
+      <group>
+        <MovingBaggageColumn from={baggage} to={withdrawal} />
+        <AidRouteMarkers from={baggage} to={withdrawal} count={6} color="#d6a96e" />
+        <AidRouteMarkers from={waterPoint} to={farmstead} count={4} color="#74a9ad" />
+      </group>
+    );
+  }
+
+  return null;
+}
+
 function Scenery({ weather, fireAttackActive }: { weather: WeatherState; fireAttackActive: boolean }) {
   const skyColor = weather.condition === "clear" ? "#a9cedd" : "#aabfc6";
   const sunPosition: Vector3Tuple = weather.condition === "clear" ? [-12, 11, 6] : [-8, 7, 5];
@@ -3452,10 +4306,21 @@ function SceneContent({
     sceneTheme === "jerusalem" && activeEvent?.action && activeEvent.action !== "fire-attack"
       ? activeEvent.action
       : undefined;
+  const montgisardAction: Exclude<WorldActionCue, "fire-attack"> | undefined =
+    sceneTheme === "montgisard" && activeEvent?.action && activeEvent.action !== "fire-attack"
+      ? activeEvent.action
+      : undefined;
 
   return (
     <>
-      {sceneTheme === "jerusalem" ? (
+      {sceneTheme === "montgisard" ? (
+        <MontgisardScenery
+          weather={weather}
+          locations={locations}
+          activeAction={montgisardAction}
+          activeEventId={activeEvent?.id}
+        />
+      ) : sceneTheme === "jerusalem" ? (
         <JerusalemScenery weather={weather} locations={locations} />
       ) : sceneTheme === "surabaya" ? (
         <SurabayaScenery weather={weather} locations={locations} />
@@ -3487,6 +4352,14 @@ function SceneContent({
           locations={locations}
         />
       )}
+      {montgisardAction && (
+        <MontgisardSceneSequence
+          key={activeEvent?.id ?? montgisardAction}
+          action={montgisardAction}
+          eventId={activeEvent?.id}
+          locations={locations}
+        />
+      )}
       <FollowCamera target={target} enabled={followSelected} />
       {agents.map((agent) => {
         if (agent.renderVisible === false) return null;
@@ -3498,6 +4371,7 @@ function SceneContent({
           agentSlots.get(agent.id),
           navigationObstacles,
         );
+        const palette = sceneAgentPalette(sceneTheme, agent);
         return (
           <AgentMarker
             key={agent.id}
@@ -3507,7 +4381,10 @@ function SceneContent({
             selected={agent.id === selectedAgentId}
             message={messagesBySpeaker.get(agent.id)}
             recipientName={messagesBySpeaker.get(agent.id)?.recipientId ? agentNames.get(messagesBySpeaker.get(agent.id)?.recipientId ?? "") : undefined}
-            factionColor={factions[agent.factionId]?.color}
+            factionColor={palette?.color ?? factions[agent.factionId]?.color}
+            factionTrim={palette?.trim}
+            idleFacing={sceneAgentIdleFacing(sceneTheme, location, agent)}
+            commandMounted={isMontgisardCommandLeader(sceneTheme, agent)}
             onSelect={onSelectAgent}
           />
         );

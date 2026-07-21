@@ -2,7 +2,7 @@
 
 Epos is an educational historical-simulation prototype. Instead of presenting a battle as a score to win, it makes logistics, weather, trust, incomplete information, and civilian impact visible as connected systems.
 
-The build includes source-aware simulations of Red Cliffs, the Battle of Waterloo, and the Battle of Surabaya. Each uses a deterministic model for repeatability in a classroom, with an optional server-only OpenAI briefing route for contextual questions.
+The build includes source-aware simulations of Red Cliffs, the Battle of Waterloo, the Battle of Surabaya, the Siege of Jerusalem (1187), and the Battle of Montgisard (1177). Each uses a deterministic model for repeatability in a classroom, with an optional server-only OpenAI briefing route for contextual questions.
 
 ## What is included
 
@@ -20,7 +20,7 @@ The build includes source-aware simulations of Red Cliffs, the Battle of Waterlo
 
 ## Scenario library
 
-Red Cliffs, Waterloo, and Surabaya are playable teaching models in this build. The in-app library also surfaces Sekigahara, Normandy, Jerusalem (1187), Central Asia (1219–1221), and the Roman Danube frontier as historical previews. Previews are intentionally not represented as working simulations until their sources, agent rules, causal model, and world are authored and reviewed.
+Red Cliffs, Waterloo, Surabaya, Jerusalem (1187), and Montgisard (1177) are playable teaching models in this build. The in-app library also surfaces Normandy, Central Asia (1219–1221), and the Roman Danube frontier as historical previews. Previews are intentionally not represented as working simulations until their sources, agent rules, causal model, and world are authored and reviewed.
 
 ## Architecture
 
@@ -36,6 +36,8 @@ lib/simulation/
   red-cliffs.ts                  Structured scenario data and what-if presets
   waterloo.ts                    Structured Waterloo data and what-if presets
   surabaya.ts                    Structured Surabaya data and what-if presets
+  jerusalem.ts                   Structured Jerusalem scenario data and presets
+  montgisard.ts                  Structured Montgisard scenario data and presets
   engine.ts                      Pure deterministic simulation functions
 stores/
   epos-store.ts                  Zustand UI/simulation state
@@ -67,7 +69,7 @@ Codex is useful for authoring and maintaining scenario packs, simulation rules, 
 
 ## Historical-method note
 
-The Red Cliffs, Waterloo, and Surabaya timelines include historical anchors alongside explicit inference and speculation labels. The Surabaya model keeps the circumstances of Brigadier Mallaby's death explicitly contested, and frames urban operations through communication, relief, displacement, and civilian safety. Numerical values, agent dialogue, and counterfactual outcomes are transparent teaching-model inputs—not claims of settled historical fact. Learners should compare the model’s causal chain with primary and secondary sources.
+The Red Cliffs, Waterloo, Surabaya, Jerusalem, and Montgisard timelines include historical anchors alongside explicit inference and speculation labels. The Surabaya model keeps the circumstances of Brigadier Mallaby's death explicitly contested, while the Montgisard model explicitly leaves the exact site, force sizes, losses, and tactical detail open to question. Numerical values, agent dialogue, and counterfactual outcomes are transparent teaching-model inputs—not claims of settled historical fact. Learners should compare the model’s causal chain with primary and secondary sources.
 
 ## Verification
 

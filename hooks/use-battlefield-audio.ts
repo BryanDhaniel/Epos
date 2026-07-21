@@ -24,6 +24,11 @@ export const BATTLEFIELD_AUDIO_CUES = [
   "siege-assault",
   "siege-parley",
   "siege-aftermath",
+  "montgisard-march",
+  "montgisard-scouting",
+  "montgisard-charge",
+  "montgisard-rally",
+  "montgisard-withdrawal",
 ] as const;
 
 export type BattlefieldAudioCue = WorldActionCue;
@@ -48,6 +53,13 @@ export const BATTLEFIELD_AMBIENCE_CUES = [
   "jerusalem-parley",
   "jerusalem-departure",
   "jerusalem-aftermath",
+  "montgisard-dry-road",
+  "montgisard-scout-line",
+  "montgisard-field-tension",
+  "montgisard-charge-field",
+  "montgisard-rally",
+  "montgisard-withdrawal",
+  "montgisard-aftermath",
 ] as const;
 
 export type BattlefieldAmbienceCue = (typeof BATTLEFIELD_AMBIENCE_CUES)[number];
@@ -106,6 +118,7 @@ type WebkitAudioWindow = Window & {
 
 const DEFAULT_CUE: BattlefieldAudioCue = "artillery-barrage";
 const JERUSALEM_AMBIENCE_DURATION = 42;
+const MONTGISARD_AMBIENCE_DURATION = 38;
 
 function getAudioContextConstructor() {
   if (typeof window === "undefined") return null;
@@ -307,7 +320,13 @@ function scheduleMusketVolley(graph: AudioGraph, at: number, count: number, inte
   }
 }
 
-function scheduleHoofbeats(graph: AudioGraph, at: number, count: number, intensity = 1) {
+function scheduleHoofbeats(
+  graph: AudioGraph,
+  at: number,
+  count: number,
+  intensity = 1,
+  layer: AudioSourceLayer = "effect",
+) {
   for (let index = 0; index < count; index += 1) {
     const beatAt = at + index * 0.145;
     scheduleTone(graph, {
@@ -317,13 +336,13 @@ function scheduleHoofbeats(graph: AudioGraph, at: number, count: number, intensi
       frequency: index % 2 === 0 ? 103 : 78,
       endFrequency: 48,
       type: "triangle",
-    });
+    }, layer);
     scheduleNoise(graph, {
       at: beatAt + 0.006,
       duration: 0.075,
       level: 0.018 * intensity,
       lowpass: 280,
-    });
+    }, layer);
   }
 }
 
@@ -798,6 +817,150 @@ function scheduleJerusalemAftermathAmbience(graph: AudioGraph, at: number) {
   });
 }
 
+function scheduleMontgisardDryRoadAmbience(graph: AudioGraph, at: number) {
+  // The battlefield's exact location is debated, so this creates a broad,
+  // modeled late-autumn Levantine soundscape rather than claiming a recording
+  // of one exact place.
+  scheduleNoise(
+    graph,
+    {
+      at,
+      duration: MONTGISARD_AMBIENCE_DURATION,
+      level: 0.044,
+      lowpass: 790,
+      highpass: 58,
+      releaseStartFraction: 0.87,
+    },
+    "ambience",
+  );
+  for (let index = 0; index < 6; index += 1) {
+    scheduleNoise(
+      graph,
+      {
+        at: at + 1.8 + index * 5.85,
+        duration: 0.62,
+        level: 0.014,
+        lowpass: 1_160,
+        highpass: 146,
+      },
+      "ambience",
+    );
+  }
+}
+
+function scheduleMontgisardScoutAmbience(graph: AudioGraph, at: number) {
+  scheduleMontgisardDryRoadAmbience(graph, at);
+  scheduleSoftFootsteps(graph, at + 0.68, 9, 3.2, 0.014, "ambience");
+  scheduleHoofbeats(graph, at + 1.5, 9, 0.36, "ambience");
+  [7.6, 19.8, 30.2].forEach((offset) => {
+    scheduleTravelCreak(graph, at + offset, 0.62, "ambience");
+  });
+}
+
+function scheduleMontgisardFieldTensionAmbience(graph: AudioGraph, at: number) {
+  scheduleMontgisardDryRoadAmbience(graph, at);
+  scheduleNoise(
+    graph,
+    {
+      at: at + 0.2,
+      duration: 34,
+      level: 0.019,
+      lowpass: 620,
+      highpass: 82,
+      releaseStartFraction: 0.86,
+    },
+    "ambience",
+  );
+  scheduleSoftFootsteps(graph, at + 0.6, 12, 2.7, 0.016, "ambience");
+  [3.4, 11.6, 20.9, 29.4].forEach((offset, index) => {
+    scheduleHoofbeats(graph, at + offset, 7 + (index % 2) * 2, 0.3, "ambience");
+  });
+}
+
+function scheduleMontgisardChargeAmbience(graph: AudioGraph, at: number) {
+  scheduleMontgisardDryRoadAmbience(graph, at);
+  scheduleNoise(
+    graph,
+    {
+      at: at + 0.1,
+      duration: 35,
+      level: 0.026,
+      lowpass: 580,
+      highpass: 70,
+      releaseStartFraction: 0.86,
+    },
+    "ambience",
+  );
+  scheduleSoftFootsteps(graph, at + 0.5, 14, 2.25, 0.018, "ambience");
+  [1.2, 7.8, 15.6, 23.2, 30.4].forEach((offset, index) => {
+    scheduleHoofbeats(graph, at + offset, 13 + (index % 2) * 3, 0.42, "ambience");
+  });
+  [4.7, 12.8, 21.4].forEach((offset) => {
+    scheduleShieldClash(graph, at + offset, 0.45, "ambience");
+  });
+}
+
+function scheduleMontgisardRallyAmbience(graph: AudioGraph, at: number) {
+  scheduleMontgisardDryRoadAmbience(graph, at);
+  scheduleNoise(
+    graph,
+    {
+      at: at + 0.18,
+      duration: 32,
+      level: 0.016,
+      lowpass: 560,
+      highpass: 72,
+      releaseStartFraction: 0.86,
+    },
+    "ambience",
+  );
+  scheduleSoftFootsteps(graph, at + 0.72, 11, 2.72, 0.016, "ambience");
+  [2.6, 14.4, 26.2].forEach((offset) => {
+    scheduleHoofbeats(graph, at + offset, 9, 0.32, "ambience");
+  });
+}
+
+function scheduleMontgisardWithdrawalAmbience(graph: AudioGraph, at: number) {
+  scheduleMontgisardDryRoadAmbience(graph, at);
+  scheduleNoise(
+    graph,
+    {
+      at: at + 0.14,
+      duration: 36,
+      level: 0.018,
+      lowpass: 600,
+      highpass: 70,
+      releaseStartFraction: 0.86,
+    },
+    "ambience",
+  );
+  scheduleSoftFootsteps(graph, at + 0.48, 15, 2.15, 0.018, "ambience");
+  [1.6, 8.8, 16.3, 24.6, 31.1].forEach((offset, index) => {
+    scheduleHoofbeats(graph, at + offset, 8 + (index % 2) * 2, 0.32, "ambience");
+    scheduleTravelCreak(graph, at + offset + 0.48, 0.76 - (index % 2) * 0.08, "ambience");
+  });
+}
+
+function scheduleMontgisardAftermathAmbience(graph: AudioGraph, at: number) {
+  scheduleMontgisardDryRoadAmbience(graph, at);
+  scheduleNoise(
+    graph,
+    {
+      at: at + 0.18,
+      duration: 31,
+      level: 0.012,
+      lowpass: 490,
+      highpass: 62,
+      releaseStartFraction: 0.86,
+    },
+    "ambience",
+  );
+  scheduleSoftFootsteps(graph, at + 1.1, 8, 3.7, 0.013, "ambience");
+  [10.4, 24.5].forEach((offset) => {
+    scheduleTravelCreak(graph, at + offset, 0.54, "ambience");
+  });
+}
+
 /** Period-appropriate low wood-and-stone pressure; deliberately not artillery. */
 function scheduleSiegeImpact(
   graph: AudioGraph,
@@ -869,6 +1032,30 @@ function scheduleTravelCreak(
   }, layer);
 }
 
+/** Short, non-gory shield / gear contact for medieval field pressure. */
+function scheduleShieldClash(
+  graph: AudioGraph,
+  at: number,
+  intensity = 1,
+  layer: AudioSourceLayer = "effect",
+) {
+  scheduleNoise(graph, {
+    at,
+    duration: 0.17,
+    level: 0.03 * intensity,
+    lowpass: 1_460,
+    highpass: 150,
+  }, layer);
+  scheduleTone(graph, {
+    at: at + 0.01,
+    duration: 0.08,
+    level: 0.014 * intensity,
+    frequency: 248,
+    endFrequency: 132,
+    type: "triangle",
+  }, layer);
+}
+
 function scheduleAmbience(graph: AudioGraph, cue: BattlefieldAmbienceCue) {
   const now = graph.context.currentTime + 0.04;
 
@@ -911,6 +1098,27 @@ function scheduleAmbience(graph: AudioGraph, cue: BattlefieldAmbienceCue) {
       return;
     case "jerusalem-aftermath":
       scheduleJerusalemAftermathAmbience(graph, now);
+      return;
+    case "montgisard-dry-road":
+      scheduleMontgisardDryRoadAmbience(graph, now);
+      return;
+    case "montgisard-scout-line":
+      scheduleMontgisardScoutAmbience(graph, now);
+      return;
+    case "montgisard-field-tension":
+      scheduleMontgisardFieldTensionAmbience(graph, now);
+      return;
+    case "montgisard-charge-field":
+      scheduleMontgisardChargeAmbience(graph, now);
+      return;
+    case "montgisard-rally":
+      scheduleMontgisardRallyAmbience(graph, now);
+      return;
+    case "montgisard-withdrawal":
+      scheduleMontgisardWithdrawalAmbience(graph, now);
+      return;
+    case "montgisard-aftermath":
+      scheduleMontgisardAftermathAmbience(graph, now);
       return;
   }
 }
@@ -1132,6 +1340,71 @@ function scheduleCue(graph: AudioGraph, cue: BattlefieldAudioCue) {
         lowpass: 560,
         highpass: 82,
       });
+      return;
+    case "montgisard-march":
+      scheduleNoise(graph, {
+        at: now + 0.06,
+        duration: 7.2,
+        level: 0.021,
+        lowpass: 650,
+        highpass: 82,
+      });
+      scheduleHoofbeats(graph, now + 0.18, 18, 0.64);
+      scheduleSoftFootsteps(graph, now + 0.26, 12, 0.56, 0.018, "effect");
+      scheduleTravelCreak(graph, now + 2.1, 0.74);
+      scheduleTravelCreak(graph, now + 5.05, 0.58);
+      return;
+    case "montgisard-scouting":
+      scheduleSoftFootsteps(graph, now + 0.14, 7, 0.66, 0.014, "effect");
+      scheduleHoofbeats(graph, now + 0.72, 8, 0.4);
+      scheduleNoise(graph, {
+        at: now + 0.18,
+        duration: 4.9,
+        level: 0.015,
+        lowpass: 820,
+        highpass: 118,
+      });
+      return;
+    case "montgisard-charge":
+      // Hooves, gear, and brief contact provide pressure without importing
+      // gunpowder effects or turning the field battle into spectacle.
+      scheduleNoise(graph, {
+        at: now + 0.08,
+        duration: 9.4,
+        level: 0.029,
+        lowpass: 620,
+        highpass: 72,
+      });
+      scheduleHoofbeats(graph, now + 0.14, 30, 0.92);
+      scheduleSoftFootsteps(graph, now + 0.22, 16, 0.48, 0.019, "effect");
+      scheduleShieldClash(graph, now + 1.64, 0.9);
+      scheduleShieldClash(graph, now + 3.72, 0.72);
+      scheduleShieldClash(graph, now + 5.84, 0.62);
+      scheduleShieldClash(graph, now + 7.62, 0.48);
+      return;
+    case "montgisard-rally":
+      scheduleNoise(graph, {
+        at: now + 0.14,
+        duration: 6.4,
+        level: 0.018,
+        lowpass: 650,
+        highpass: 82,
+      });
+      scheduleSoftFootsteps(graph, now + 0.22, 12, 0.52, 0.017, "effect");
+      scheduleHoofbeats(graph, now + 0.74, 13, 0.46);
+      return;
+    case "montgisard-withdrawal":
+      scheduleNoise(graph, {
+        at: now + 0.1,
+        duration: 8.4,
+        level: 0.021,
+        lowpass: 600,
+        highpass: 74,
+      });
+      scheduleHoofbeats(graph, now + 0.2, 20, 0.5);
+      scheduleSoftFootsteps(graph, now + 0.28, 14, 0.58, 0.017, "effect");
+      scheduleTravelCreak(graph, now + 2.6, 0.84);
+      scheduleTravelCreak(graph, now + 5.9, 0.7);
       return;
     default:
       return;

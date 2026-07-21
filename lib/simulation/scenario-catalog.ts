@@ -1,5 +1,6 @@
 import { RED_CLIFFS_SCENARIO, RED_CLIFFS_WHAT_IF_PRESETS } from "./red-cliffs";
 import { JERUSALEM_SCENARIO, JERUSALEM_WHAT_IF_PRESETS } from "./jerusalem";
+import { MONTGISARD_SCENARIO, MONTGISARD_WHAT_IF_PRESETS } from "./montgisard";
 import { SURABAYA_SCENARIO, SURABAYA_WHAT_IF_PRESETS } from "./surabaya";
 import { WATERLOO_SCENARIO, WATERLOO_WHAT_IF_PRESETS } from "./waterloo";
 import type { ScenarioDefinition, WhatIfModifier } from "./types";
@@ -64,15 +65,17 @@ export const SCENARIO_CATALOG: readonly ScenarioPack[] = [
     whatIfPresets: WATERLOO_WHAT_IF_PRESETS,
   },
   {
-    id: "sekigahara-1600",
-    title: "Sekigahara Campaign",
-    era: "1600 · Japan",
-    locationLabel: "Sekigahara · Japan",
-    coordinateLabel: "35.37° N · 136.47° E",
-    learningFocus: ["diplomacy", "geography", "leadership", "logistics"],
-    scopeNote: "A future model of alliances, movement through mountain passes, information uncertainty, and shifting commitments.",
-    status: "preview",
-    previewNote: "Historical preview — the simulation model, source pack, and world are in development.",
+    id: MONTGISARD_SCENARIO.id,
+    title: MONTGISARD_SCENARIO.title,
+    era: MONTGISARD_SCENARIO.era,
+    locationLabel: "Near Ramla · Levant",
+    coordinateLabel: "Modeled landscape · exact site debated",
+    learningFocus: ["leadership", "logistics", "geography", "civilian impact"],
+    scopeNote: "A playable, source-aware model of routes, dispersed movement, surprise, and the social consequences of a field campaign in 1177.",
+    status: "playable",
+    scenario: MONTGISARD_SCENARIO,
+    defaultAgentId: "baldwin-iv",
+    whatIfPresets: MONTGISARD_WHAT_IF_PRESETS,
   },
   {
     id: "normandy-1944",
